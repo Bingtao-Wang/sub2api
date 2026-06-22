@@ -308,6 +308,21 @@ const GiftIcon = {
     )
 }
 
+const ImageIcon = {
+  render: () =>
+    h(
+      'svg',
+      { fill: 'none', viewBox: '0 0 24 24', stroke: 'currentColor', 'stroke-width': '1.5' },
+      [
+        h('path', {
+          'stroke-linecap': 'round',
+          'stroke-linejoin': 'round',
+          d: 'M3.75 6A2.25 2.25 0 016 3.75h12A2.25 2.25 0 0120.25 6v12A2.25 2.25 0 0118 20.25H6A2.25 2.25 0 013.75 18V6zM8.25 9.75h.008v.008H8.25V9.75zm2.25 6l2.25-2.25a1.5 1.5 0 012.121 0l2.379 2.379M8.25 15.75l1.5-1.5a1.5 1.5 0 012.121 0l.879.879'
+        })
+      ]
+    )
+}
+
 const UserIcon = {
   render: () =>
     h(
@@ -736,6 +751,7 @@ const adminNavItems = computed((): NavItem[] => {
     { path: '/admin/announcements', label: t('nav.announcements'), icon: BellIcon },
     { path: '/admin/proxies', label: t('nav.proxies'), icon: ServerIcon },
     { path: '/admin/risk-control', label: t('nav.riskControl'), icon: ShieldIcon, hideInSimpleMode: true, featureFlag: flagRiskControl },
+    { path: '/admin/gallery', label: t('nav.gallery'), icon: ImageIcon, hideInSimpleMode: true },
     { path: '/admin/redeem', label: t('nav.redeemCodes'), icon: TicketIcon, hideInSimpleMode: true },
     { path: '/admin/promo-codes', label: t('nav.promoCodes'), icon: GiftIcon, hideInSimpleMode: true },
     {

@@ -122,5 +122,18 @@ func RegisterUserRoutes(
 			monitors.GET("", h.ChannelMonitor.List)
 			monitors.GET("/:id/status", h.ChannelMonitor.GetStatus)
 		}
+
+		gallery := authenticated.Group("/gallery")
+		{
+			gallery.POST("/items", middleware.RequestBodyLimit(60*1024*1024), h.Gallery.Create)
+			gallery.GET("/my", h.Gallery.ListMine)
+			gallery.DELETE("/items/:id", h.Gallery.Delete)
+		}
+	}
+
+	galleryPublic := v1.Group("/gallery")
+	{
+		galleryPublic.GET("/items", h.Gallery.List)
+		galleryPublic.GET("/media/*path", h.Gallery.ServeMedia)
 	}
 }

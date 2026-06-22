@@ -395,6 +395,7 @@ export default {
     redeemCodes: 'Redeem Codes',
     ops: 'Ops',
     promoCodes: 'Promo Codes',
+    gallery: 'Image Gallery',
     settings: 'Settings',
     myAccount: 'My Account',
     lightMode: 'Light Mode',

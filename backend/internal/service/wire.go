@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"database/sql"
+	"os"
+	"path/filepath"
 	"time"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
@@ -192,6 +194,17 @@ func ProvideDashboardAggregationService(repo DashboardAggregationRepository, tim
 func ProvideUsageCleanupService(repo UsageCleanupRepository, timingWheel *TimingWheelService, dashboardAgg *DashboardAggregationService, cfg *config.Config) *UsageCleanupService {
 	svc := NewUsageCleanupService(repo, timingWheel, dashboardAgg, cfg)
 	svc.Start()
+	return svc
+}
+
+func ProvideGalleryService(repo GalleryRepository, cfg *config.Config) *GalleryService {
+	dataDir := "./data"
+	if cfg != nil && cfg.Pricing.DataDir != "" {
+		dataDir = cfg.Pricing.DataDir
+	}
+	svc := NewGalleryService(repo, GalleryConfig{DataDir: dataDir})
+	_ = os.MkdirAll(filepath.Join(dataDir, "gallery"), 0755)
+	svc.StartCleanupWorker()
 	return svc
 }
 
@@ -643,6 +656,7 @@ var ProviderSet = wire.NewSet(
 	ProvideChannelMonitorRunner,
 	NewChannelMonitorRequestTemplateService,
 	ProvideUserPlatformQuotaUsageFlusher,
+	ProvideGalleryService,
 )
 
 // ProvideUserPlatformQuotaUsageFlusher 创建并启动 UserPlatformQuotaUsageFlusher。

@@ -19,6 +19,7 @@ services:
     image: weishaw/sub2api:latest
     container_name: sub2api
     restart: unless-stopped
+    mem_limit: 384m
     ulimits:
       nofile:
         soft: 100000
@@ -112,6 +113,13 @@ services:
       - TZ=${TZ:-Asia/Shanghai}
 
       # =======================================================================
+      # HTTP Proxy Configuration (for OpenAI OAuth, etc.)
+      # =======================================================================
+      - HTTP_PROXY=${HTTP_PROXY:-}
+      - HTTPS_PROXY=${HTTPS_PROXY:-}
+      - NO_PROXY=${NO_PROXY:-localhost,127.0.0.1}
+
+      # =======================================================================
       # Gemini OAuth Configuration (for Gemini accounts)
       # =======================================================================
       - GEMINI_OAUTH_CLIENT_ID=${GEMINI_OAUTH_CLIENT_ID:-}
@@ -192,6 +200,7 @@ services:
     image: postgres:18-alpine
     container_name: sub2api-postgres
     restart: unless-stopped
+    mem_limit: 256m
     ulimits:
       nofile:
         soft: 100000
@@ -229,6 +238,7 @@ services:
     image: redis:8-alpine
     container_name: sub2api-redis
     restart: unless-stopped
+    mem_limit: 128m
     ulimits:
       nofile:
         soft: 100000
