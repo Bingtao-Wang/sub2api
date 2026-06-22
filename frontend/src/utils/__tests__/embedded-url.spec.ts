@@ -56,6 +56,17 @@ describe('embedded-url', () => {
     expect(url.searchParams.has('lang')).toBe(false)
   })
 
+  it('resolves root-relative URLs against the current origin', () => {
+    const result = buildEmbeddedUrl('/image-generator/', 7, 'token-456', 'dark', 'zh-CN')
+
+    const url = new URL(result)
+    expect(url.origin).toBe('https://app.example.com')
+    expect(url.pathname).toBe('/image-generator/')
+    expect(url.searchParams.get('user_id')).toBe('7')
+    expect(url.searchParams.get('token')).toBe('token-456')
+    expect(url.searchParams.get('ui_mode')).toBe('embedded')
+  })
+
   it('returns original string for invalid url input', () => {
     expect(buildEmbeddedUrl('not a url', 1, 'token')).toBe('not a url')
   })

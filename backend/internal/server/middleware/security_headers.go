@@ -34,6 +34,7 @@ var requiredCSPDirectiveValues = []struct {
 	directive string
 	value     string
 }{
+	{"frame-src", "'self'"},
 	{"script-src", CloudflareInsightsDomain},
 	{"script-src", StripeDomain},
 	{"frame-src", StripeDomain},
@@ -90,9 +91,17 @@ func SecurityHeaders(cfg config.CSPConfig, getFrameSrcOrigins func() []string) g
 				}
 			}
 		}
+		allowSameOriginFrame := isSameOriginFrameAllowedPath(c)
+		if allowSameOriginFrame {
+			finalPolicy = setDirective(finalPolicy, "frame-ancestors", "'self'")
+		}
 
 		c.Header("X-Content-Type-Options", "nosniff")
-		c.Header("X-Frame-Options", "DENY")
+		if allowSameOriginFrame {
+			c.Header("X-Frame-Options", "SAMEORIGIN")
+		} else {
+			c.Header("X-Frame-Options", "DENY")
+		}
 		c.Header("Referrer-Policy", "strict-origin-when-cross-origin")
 		if isAPIRoutePath(c) {
 			c.Next()
@@ -113,6 +122,14 @@ func SecurityHeaders(cfg config.CSPConfig, getFrameSrcOrigins func() []string) g
 		}
 		c.Next()
 	}
+}
+
+func isSameOriginFrameAllowedPath(c *gin.Context) bool {
+	if c == nil || c.Request == nil || c.Request.URL == nil {
+		return false
+	}
+	path := c.Request.URL.Path
+	return path == "/image-generator" || strings.HasPrefix(path, "/image-generator/")
 }
 
 func isAPIRoutePath(c *gin.Context) bool {
@@ -142,6 +159,23 @@ func enhanceCSPPolicy(policy string) string {
 	}
 
 	return policy
+}
+
+func setDirective(policy, directive string, values ...string) string {
+	replacement := strings.TrimSpace(directive + " " + strings.Join(values, " "))
+	parts := strings.Split(policy, ";")
+	for i, rawPart := range parts {
+		fields := strings.Fields(strings.TrimSpace(rawPart))
+		if len(fields) == 0 || fields[0] != directive {
+			continue
+		}
+		parts[i] = " " + replacement
+		return strings.TrimSpace(strings.Join(parts, ";"))
+	}
+	if strings.TrimSpace(policy) == "" {
+		return replacement
+	}
+	return strings.TrimSpace(policy) + "; " + replacement
 }
 
 func directiveHasValue(policy, directive, value string) bool {
