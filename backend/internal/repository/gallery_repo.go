@@ -96,7 +96,7 @@ func (r *galleryRepository) list(ctx context.Context, params pagination.Paginati
 	if err != nil {
 		return nil, nil, fmt.Errorf("list gallery items: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	items, err := scanGalleryRows(rows)
 	if err != nil {
 		return nil, nil, err
@@ -200,7 +200,7 @@ func (r *galleryRepository) ListCleanupCandidates(ctx context.Context, before ti
 	if err != nil {
 		return nil, fmt.Errorf("list gallery cleanup candidates: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	return scanGalleryRows(rows)
 }
 
