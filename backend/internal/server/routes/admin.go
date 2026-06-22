@@ -103,6 +103,18 @@ func RegisterAdminRoutes(
 
 		// 邀请返利（专属用户管理）
 		registerAffiliateRoutes(admin, h)
+
+		// 图片画廊管理
+		registerGalleryRoutes(admin, h)
+	}
+}
+
+func registerGalleryRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+	gallery := admin.Group("/gallery")
+	{
+		gallery.GET("/items", h.Admin.Gallery.List)
+		gallery.PUT("/items/:id", h.Admin.Gallery.Update)
+		gallery.POST("/cleanup", h.Admin.Gallery.Cleanup)
 	}
 }
 
