@@ -1331,8 +1331,8 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 					response.BadRequest(c, "Custom menu item URL is too long (max 2048 characters)")
 					return
 				}
-				if err := config.ValidateAbsoluteHTTPURL(urlTrimmed); err != nil {
-					response.BadRequest(c, "Custom menu item URL must be an absolute http(s) URL or md:<slug>")
+				if err := config.ValidateFrontendRedirectURL(urlTrimmed); err != nil {
+					response.BadRequest(c, "Custom menu item URL must be an absolute http(s) URL, a relative path, or md:<slug>")
 					return
 				}
 			}
