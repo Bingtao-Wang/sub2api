@@ -22,7 +22,11 @@ export function buildEmbeddedUrl(
 ): string {
   if (!baseUrl) return baseUrl
   try {
-    const url = new URL(baseUrl)
+    const trimmedBaseUrl = baseUrl.trim()
+    const baseOrigin = typeof window !== 'undefined' ? window.location.origin : undefined
+    const url = trimmedBaseUrl.startsWith('/') && baseOrigin
+      ? new URL(trimmedBaseUrl, baseOrigin)
+      : new URL(trimmedBaseUrl)
     if (userId) {
       url.searchParams.set(EMBEDDED_USER_ID_QUERY_KEY, String(userId))
     }

@@ -97,14 +97,15 @@ func (s *FrontendServer) Middleware() gin.HandlerFunc {
 			cleanPath = "index.html"
 		}
 
-		// For index.html or SPA routes, serve with injected settings
-		if cleanPath == "index.html" || !s.fileExists(cleanPath) {
-			s.serveIndexHTML(c)
+		// Try local override before falling back to the SPA index. This allows
+		// operators to serve small static tools from data/public/<path>/.
+		if s.tryServeOverride(c, cleanPath) {
 			return
 		}
 
-		// Try local override first
-		if s.tryServeOverride(c, cleanPath) {
+		// For index.html or SPA routes, serve with injected settings
+		if cleanPath == "index.html" || !s.fileExists(cleanPath) {
+			s.serveIndexHTML(c)
 			return
 		}
 
@@ -131,8 +132,14 @@ func (s *FrontendServer) tryServeOverride(c *gin.Context, cleanPath string) bool
 	}
 	filePath := filepath.Join(s.overrideDir, filepath.Clean("/"+cleanPath))
 	info, err := os.Stat(filePath)
-	if err != nil || info.IsDir() {
+	if err != nil {
 		return false
+	}
+	if info.IsDir() {
+		filePath = filepath.Join(filePath, "index.html")
+		if info, err = os.Stat(filePath); err != nil || info.IsDir() {
+			return false
+		}
 	}
 	c.File(filePath)
 	c.Abort()
@@ -266,12 +273,12 @@ func ServeEmbeddedFrontend() gin.HandlerFunc {
 			cleanPath = "index.html"
 		}
 
+		if tryServeOverrideFile(c, overrideDir, cleanPath) {
+			return
+		}
+
 		if file, err := distFS.Open(cleanPath); err == nil {
 			_ = file.Close()
-			// Try local override first
-			if tryServeOverrideFile(c, overrideDir, cleanPath) {
-				return
-			}
 			fileServer.ServeHTTP(c.Writer, c.Request)
 			c.Abort()
 			return
@@ -288,8 +295,14 @@ func tryServeOverrideFile(c *gin.Context, overrideDir, cleanPath string) bool {
 	}
 	filePath := filepath.Join(overrideDir, filepath.Clean("/"+cleanPath))
 	info, err := os.Stat(filePath)
-	if err != nil || info.IsDir() {
+	if err != nil {
 		return false
+	}
+	if info.IsDir() {
+		filePath = filepath.Join(filePath, "index.html")
+		if info, err = os.Stat(filePath); err != nil || info.IsDir() {
+			return false
+		}
 	}
 	c.File(filePath)
 	c.Abort()
