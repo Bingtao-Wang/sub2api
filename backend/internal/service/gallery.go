@@ -674,15 +674,6 @@ func trimMax(value string, max int) string {
 	return string(runes[:max])
 }
 
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if strings.TrimSpace(value) != "" {
-			return strings.TrimSpace(value)
-		}
-	}
-	return ""
-}
-
 func minInt64(a, b int64) int64 {
 	if a < b {
 		return a
