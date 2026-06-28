@@ -32,6 +32,7 @@
   - [6.2 发布流程](#62-发布流程)
   - [6.3 回滚流程](#63-回滚流程)
 - [七、更新记录](#七更新记录)
+  - [2026-06-28](#2026-06-28)
   - [2026-06-27](#2026-06-27)
   - [2026-06-23](#2026-06-23)
   - [2026-06-22](#2026-06-22)
@@ -144,7 +145,7 @@ git branch custom/gallery-backup-$(date +%Y%m%d) custom/gallery
 当前运行约定：
 
 - Compose 项目名：`peter-sub2api`
-- 应用镜像：`sub2api-custom:20260622`
+- 应用镜像：`sub2api-custom:20260628`
 - 本机监听：`127.0.0.1:18080`
 - 容器服务端口：`8080`
 - Postgres：Compose 内部服务 `postgres`
@@ -767,6 +768,37 @@ sg docker -c 'docker compose -f /home/aihub/Peter_ws/sub2api/deploy/docker-compo
 不要删除数据库或 volume。回滚应用镜像通常不需要动 Postgres/Redis。
 
 ## 七、更新记录
+
+### 2026-06-28
+
+- 按本手册完成上游同步：
+  - `upstream/main` 从 `85a3b122` 更新到 `c2754222`，上游版本同步到 `v0.1.139`。
+  - 本地 `main` 已 reset 到 `upstream/main`。
+  - `custom/gallery` 已 rebase 到最新 `main`，保留 GPT-5.5 默认模型、图片画廊、PeterAI 画图相关修复、失败图片不扣费、same-origin embedded static pages、使用教程页等自定义能力。
+  - `gpt55-defaults` 已 rebase 到最新 `main`。
+- 冲突处理：
+  - `backend/cmd/server/wire_gen.go`：保留上游新增的 Grok OAuth / Compliance wiring，同时保留画廊 handler 和 `GalleryService` cleanup。
+  - `frontend/src/components/keys/UseKeyModal.vue`：保留上游 Claude Code `CLAUDE_CODE_ATTRIBUTION_HEADER=0`，并继续复用本 fork 的 `frontend/src/utils/clientConfig.ts` 配置生成器。
+- 备份：
+  - Git 备份分支：`custom/gallery-backup-20260628-222516`
+  - Git 备份分支：`gpt55-defaults-backup-20260628-222848`
+  - 数据库备份：`/home/aihub/Peter_ws/migration/sub2api_pg_before_upstream_20260628_223316.dump`
+- 验证：
+  - 前端相关单测通过：`clientConfig.spec.ts`、`UsageTutorialView.spec.ts`、`AppSidebar.spec.ts`。
+  - `npm run typecheck` 通过。
+  - `npm run build` 通过，仅有既有 Vite chunk / dynamic import 警告。
+  - Docker 镜像构建通过：`sub2api-custom:20260628`。
+  - 本机健康检查通过：`http://127.0.0.1:18080/health -> {"status":"ok"}`。
+  - 公网健康检查通过：`https://api.peterai.cc.cd/health -> {"status":"ok"}`。
+  - 公网画图页 `main.js` 语法检查通过，`single_dollar_forEach = 0`。
+  - 图片价格仍为每张 `0.1`：所有用户组 `1K / 2K / 4K` 最小值和最大值均为 `0.10000000`。
+- 发布：
+  - 已部署镜像：`sub2api-custom:20260628`
+  - `deploy/.env` 已指向 `SUB2API_IMAGE=sub2api-custom:20260628`。
+  - 仅重建应用容器 `sub2api`，Postgres / Redis 未重建。
+- 远程状态：
+  - 当前环境缺少 GitHub HTTPS 凭据，`git push origin main` 返回 `fatal: could not read Username for 'https://github.com': No such device or address`。
+  - 本地分支已完成更新，但 `origin/main`、`origin/custom/gallery`、`origin/gpt55-defaults` 尚未推送。
 
 ### 2026-06-27
 
