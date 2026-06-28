@@ -32,6 +32,7 @@
   - [6.2 发布流程](#62-发布流程)
   - [6.3 回滚流程](#63-回滚流程)
 - [七、更新记录](#七更新记录)
+  - [2026-06-27](#2026-06-27)
   - [2026-06-23](#2026-06-23)
   - [2026-06-22](#2026-06-22)
 
@@ -288,11 +289,209 @@ sg docker -c 'docker run --rm -v peter-sub2api_sub2api_data:/data alpine ls -la 
 
 ### 4.3 PeterAI 画图页面
 
-当前页面入口：
+#### 4.3.1 真实入口与文件位置
+
+用户实际访问入口通常是自定义菜单页：
+
+```text
+https://api.peterai.cc.cd/custom/6768ebe29836ec72
+```
+
+该页面是主 Vue 页面，它会从 `window.__APP_CONFIG__.custom_menu_items` 读取菜单 URL，再嵌入画图 iframe。
+
+画图 iframe 入口：
 
 ```text
 https://api.peterai.cc.cd/image-generator/
 ```
+
+重要：画图页不是 Vue 前端编译产物，不需要 `pnpm build`。生产优先生效路径是 Docker volume 中的静态覆盖目录：
+
+```text
+/app/data/public/image-generator/
+```
+
+宿主机当前对应 Docker volume：
+
+```text
+peter-sub2api_sub2api_data
+```
+
+由于该 volume 在宿主机 `/var/lib/docker/volumes/...` 可能没有当前用户权限，推荐通过容器或临时 alpine 容器检查：
+
+```bash
+sg docker -c 'docker exec peter-sub2api-sub2api-1 sh -lc "ls -la /app/data/public/image-generator && wc -c /app/data/public/image-generator/index.html /app/data/public/image-generator/main.js"'
+sg docker -c 'docker run --rm -v peter-sub2api_sub2api_data:/data alpine sh -lc "ls -la /data/public/image-generator"'
+```
+
+#### 4.3.2 正确修改流程
+
+修改画图页时按以下顺序做，缺任何一步都可能导致用户仍加载旧代码：
+
+1. 修改本地源文件：
+   - `/home/aihub/Peter_ws/image-generator-index.html`
+   - `/home/aihub/Peter_ws/image-generator-main.js`
+2. 修改 `image-generator-index.html` 里的 `main.js?v=...` 版本号。
+3. 语法检查：
+
+```bash
+node -c /home/aihub/Peter_ws/image-generator-main.js
+```
+
+4. 复制静态文件到正在运行的容器覆盖目录：
+
+```bash
+sg docker -c 'docker exec peter-sub2api-sub2api-1 sh -lc "mkdir -p /app/data/public/image-generator"'
+sg docker -c 'docker cp /home/aihub/Peter_ws/image-generator-index.html peter-sub2api-sub2api-1:/app/data/public/image-generator/index.html'
+sg docker -c 'docker cp /home/aihub/Peter_ws/image-generator-main.js peter-sub2api-sub2api-1:/app/data/public/image-generator/main.js'
+```
+
+5. 如果 `/custom/<id>` 的 iframe URL 需要强制刷新缓存，同步更新数据库 `settings.custom_menu_items` 中该菜单 URL 的查询参数，例如 `?v=image-502-failover-20260627`。
+6. 重启应用容器，清掉后端 `HTMLCache`，否则 `/custom/<id>` HTML 里可能仍注入旧菜单 URL：
+
+```bash
+sg docker -c 'docker restart peter-sub2api-sub2api-1'
+curl -sS http://127.0.0.1:18080/health
+```
+
+7. 使用公网 URL 验证，不能只看本地文件。
+
+#### 4.3.3 生图 HTTP 502 排查要点
+
+`生成失败 HTTP 502` 不一定是前端问题。必须先看后端日志确认真实上游、账号和错误：
+
+```bash
+docker logs --since 2h peter-sub2api-sub2api-1 2>&1 \
+  | rg -n -C 6 'images/generations|openai.images.forward_failed|upstream request failed|status_code":502'
+```
+
+2026-06-27 的真实原因：
+
+```text
+/v1/images/generations
+api_key_id=31 FaXian_api
+group_id=25 生图模型
+account_id=4562 FX_image2
+upstream=https://www.findcg.com/v1/images/generations
+error=dial tcp ...:443: connect: connection refused
+```
+
+检查生图组当前可调度账号：
+
+```bash
+docker exec peter-sub2api-postgres-1 psql -U sub2api -d sub2api -P pager=off -F $'\t' -Atc "
+select ag.account_id, a.name, a.status, a.schedulable, a.priority,
+       coalesce(a.credentials->>'base_url','') as base_url,
+       coalesce(a.error_message,'') as error_message
+from account_groups ag
+join accounts a on a.id=ag.account_id
+where ag.group_id=25 and a.deleted_at is null
+order by a.priority, a.id;"
+```
+
+如果唯一 `schedulable=true` 的账号上游不可用，后端只能返回 502。2026-06-27 已做的热修：
+
+```sql
+update accounts
+set schedulable = false,
+    error_message = 'Disabled 2026-06-27: image upstream https://www.findcg.com returned TCP connection refused for /v1/images/generations'
+where id = 4562;
+
+update accounts
+set schedulable = true,
+    error_message = null
+where id = 4565;
+```
+
+后端源码也已修正：Images API 的 transport/network 错误必须返回 `UpstreamFailoverError`，不能只 `fmt.Errorf("upstream request failed...")`，否则连接拒绝/超时时不会进入账号 failover。
+
+命中文件：
+
+```text
+backend/internal/service/openai_images.go
+backend/internal/service/openai_images_responses.go
+```
+
+如果页面显示：
+
+```text
+正在并行生成 1 张图片，请稍候...
+图片 1/1: 正在通过备用接口生成...
+```
+
+并持续几十秒到两分钟，说明前端请求已经发到 `/v1/images/generations`，但上游长时间没有返回图片流数据。之前运行配置里：
+
+```text
+GATEWAY_IMAGE_STREAM_DATA_INTERVAL_TIMEOUT=900
+```
+
+这会让后端最多等 900 秒才判定图片流空闲超时。2026-06-27 已调整：
+
+```text
+GATEWAY_IMAGE_STREAM_DATA_INTERVAL_TIMEOUT=90
+```
+
+同时 `image-generator-main.js` 增加浏览器侧 90 秒单次请求超时：
+
+```text
+IMAGE_REQUEST_TIMEOUT_MS = 90000
+```
+
+如果 90 秒仍没有任何响应，前端会中断本次请求并重试，避免用户看到 136 秒以上才重试。
+
+#### 4.3.4 必须验证真实公网文件
+
+如果用户仍反馈旧错误，例如：
+
+```text
+生成失败
+$(...).forEach is not a function
+```
+
+不要只看本地 `/home/aihub/Peter_ws/image-generator-main.js`。必须检查三层真实链路：
+
+1. `/custom/<id>` 注入的菜单 URL 是否是新版。
+2. `/image-generator/` 返回的 `main.js?v=...` 是否是新版。
+3. 公网 `main.js` 内容是否是新版。
+
+```bash
+curl -k -sS https://api.peterai.cc.cd/custom/6768ebe29836ec72 -o /tmp/custom-page.html
+grep -o 'image-generator/?v=[^"\\]*' /tmp/custom-page.html | head
+
+curl -k -sS https://api.peterai.cc.cd/image-generator/ -o /tmp/image-generator-index.html
+grep -n "main.js" /tmp/image-generator-index.html
+
+curl -k -sS 'https://api.peterai.cc.cd/image-generator/main.js?v=<当前版本号>' -o /tmp/image-generator-main.js
+node -c /tmp/image-generator-main.js
+node - <<'NODE'
+const fs = require('fs')
+const s = fs.readFileSync('/tmp/image-generator-main.js', 'utf8')
+let bad = 0
+s.split(/\n/).forEach((line, i) => {
+  if (!line.includes('.forEach')) return
+  for (let p = line.indexOf('$('); p !== -1; p = line.indexOf('$(', p + 1)) {
+    if (p === 0 || line[p - 1] !== '$') {
+      bad++
+      console.log((i + 1) + ':' + line)
+    }
+  }
+})
+console.log('single_dollar_forEach =', bad)
+NODE
+```
+
+`single_dollar_forEach` 必须为 `0`。如果公网文件正确但用户仍看到旧错误，优先检查 iframe 入口 URL 是否仍在使用旧缓存或另一个域。
+
+#### 4.3.5 前端样式注意事项
+
+历史记录缩略图依赖 `styles.css` 中的 `.history-thumb`：
+
+```css
+height: 0;
+padding-bottom: 75%;
+```
+
+如果把 `.history-thumb` 从 `div` 改成 `button`，动态 CSS 只能重置 `appearance/border/background`，不要写 `padding: 0`，否则会覆盖 `padding-bottom: 75%`，导致缩略图高度变成 0、看起来不显示。
 
 当前价格展示：
 
@@ -315,6 +514,55 @@ curl -sS 'https://api.peterai.cc.cd/image-generator/main.js?v=price-010-dollar-2
 - 或使用无痕窗口访问
 
 ### 4.4 自定义菜单 URL
+
+当前 PeterAI 画图菜单 URL 来自数据库 `settings.custom_menu_items`，不是前端硬编码。当前应指向：
+
+```text
+https://api.peterai.cc.cd/image-generator/?v=<当前画图页版本>
+```
+
+检查命令：
+
+```bash
+sg docker -c 'docker exec peter-sub2api-postgres-1 psql -U sub2api -d sub2api -c "select value from settings where key='\''custom_menu_items'\'';"'
+curl -sS http://127.0.0.1:18080/api/v1/settings/public | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>console.log(JSON.stringify(JSON.parse(s).data.custom_menu_items,null,2)))"
+```
+
+更新菜单 URL 查询参数示例：
+
+```bash
+sg docker -c 'docker exec peter-sub2api-postgres-1 psql -U sub2api -d sub2api -t -A -c "select value from settings where key='\''custom_menu_items'\'';"' > /tmp/custom_menu_items.json
+
+node - <<'NODE' > /tmp/update_custom_menu.sql
+const fs = require('fs')
+const items = JSON.parse(fs.readFileSync('/tmp/custom_menu_items.json', 'utf8').trim())
+for (const item of items) {
+  if (item.url && item.url.includes('/image-generator/')) {
+    const u = new URL(item.url)
+    u.searchParams.set('v', 'image-502-failover-20260627')
+    item.url = u.toString()
+  }
+}
+console.log(`update settings set value = $json$${JSON.stringify(items)}$json$, updated_at = now() where key = 'custom_menu_items';`)
+NODE
+
+sg docker -c 'docker exec -i peter-sub2api-postgres-1 psql -U sub2api -d sub2api < /tmp/update_custom_menu.sql'
+```
+
+如果要强制 iframe 入口刷新缓存，给菜单 URL 加查询参数，例如：
+
+```text
+https://api.peterai.cc.cd/image-generator/?v=image-502-failover-20260627
+```
+
+注意：直接改数据库 `settings.custom_menu_items` 后，`/custom/<id>` 的 HTML 注入配置可能仍被后端 `HTMLCache` 缓存。需要重启应用容器或通过管理端设置保存流程触发缓存失效：
+
+```bash
+sg docker -c 'docker restart peter-sub2api-sub2api-1'
+curl -k -sS https://api.peterai.cc.cd/custom/6768ebe29836ec72 | grep -o 'image-generator[^"]*'
+```
+
+如果这里仍没有新的 `?v=...`，说明用户打开的自定义页还会嵌入旧 iframe URL。
 
 之前保存易支付方式时遇到：
 
@@ -443,6 +691,37 @@ curl -sS https://api.peterai.cc.cd/health
 sg docker -c 'docker compose -f /home/aihub/Peter_ws/sub2api/deploy/docker-compose.yml --env-file /home/aihub/Peter_ws/sub2api/deploy/.env logs --tail=100 sub2api'
 ```
 
+画图页发布验证：
+
+```bash
+# 1. 父级自定义页应注入新版 iframe URL
+curl -k -sS https://api.peterai.cc.cd/custom/6768ebe29836ec72 -o /tmp/custom-page.html
+grep -o 'image-generator/?v=[^"\\]*' /tmp/custom-page.html | head
+
+# 2. iframe HTML 应引用新版 main.js
+curl -k -sS 'https://api.peterai.cc.cd/image-generator/?v=<当前版本号>' -o /tmp/image-generator-index.html
+grep -n 'main.js' /tmp/image-generator-index.html
+
+# 3. 公网 main.js 应语法正确，且没有单 $().forEach
+curl -k -sS 'https://api.peterai.cc.cd/image-generator/main.js?v=<当前版本号>' -o /tmp/image-generator-main.js
+node -c /tmp/image-generator-main.js
+node - <<'NODE'
+const fs = require('fs')
+const s = fs.readFileSync('/tmp/image-generator-main.js', 'utf8')
+let bad = 0
+s.split(/\n/).forEach((line, i) => {
+  if (!line.includes('.forEach')) return
+  for (let p = line.indexOf('$('); p !== -1; p = line.indexOf('$(', p + 1)) {
+    if (p === 0 || line[p - 1] !== '$') {
+      bad++
+      console.log((i + 1) + ':' + line)
+    }
+  }
+})
+console.log('single_dollar_forEach =', bad)
+NODE
+```
+
 检查图片价格：
 
 ```bash
@@ -457,6 +736,7 @@ sg docker -c 'docker compose -f /home/aihub/Peter_ws/sub2api/deploy/docker-compo
 cd /home/aihub/Peter_ws/sub2api
 git checkout custom/gallery
 sg docker -c 'docker build -t sub2api-custom:YYYYMMDD .'
+# 构建成功后，把 /home/aihub/Peter_ws/sub2api/deploy/.env 里的 SUB2API_IMAGE 改成新 tag。
 sg docker -c 'docker compose -f /home/aihub/Peter_ws/sub2api/deploy/docker-compose.yml --env-file /home/aihub/Peter_ws/sub2api/deploy/.env up -d --force-recreate sub2api'
 curl -sS https://api.peterai.cc.cd/health
 ```
@@ -487,6 +767,41 @@ sg docker -c 'docker compose -f /home/aihub/Peter_ws/sub2api/deploy/docker-compo
 不要删除数据库或 volume。回滚应用镜像通常不需要动 Postgres/Redis。
 
 ## 七、更新记录
+
+### 2026-06-27
+
+- 修复 PeterAI 画图页 `生成失败 HTTP 502`：
+  - 真实日志显示请求 `/v1/images/generations` 路由到 `account_id=4562 FX_image2`，上游 `https://www.findcg.com/v1/images/generations` 返回 TCP `connect: connection refused`。
+  - 生图组 `group_id=25` 原本只有 `4562 FX_image2` 可调度，已暂停该账号调度并启用同组 `4565 Krill生图`。
+  - 前端静态版本更新为 `image-502-failover-20260627`，已覆盖容器 `/app/data/public/image-generator/index.html` 和 `main.js`，并同步数据库 `settings.custom_menu_items` 的 iframe URL 查询参数。
+  - `image-generator-main.js` 为 Images API 和 Images Edit API 增加 retry/progress，HTTP 502/连接拒绝时不再 0.6 秒直接静默失败，会显示重试状态和更准确提示。
+  - 后端源码修复 Images API transport/network 错误：`backend/internal/service/openai_images.go` 和 `backend/internal/service/openai_images_responses.go` 改为返回 `handleOpenAIUpstreamTransportError(...)`，让连接拒绝/超时进入账号 failover。
+  - 已构建并部署镜像 `sub2api-custom:image-502-failover-20260627`，`deploy/.env` 已指向该镜像。
+- 优化 PeterAI 画图页长时间无响应和动画问题：
+  - 现象：页面显示“正在通过备用接口生成...”后 100 多秒才提示 `Images API 服务暂时不可用，15秒后重试`。
+  - 真实原因：当前可调度图片上游长时间不返回图片流数据；后端默认 `GATEWAY_IMAGE_STREAM_DATA_INTERVAL_TIMEOUT=900`，等待过长。
+  - 已把 `deploy/.env` 设置为 `GATEWAY_IMAGE_STREAM_DATA_INTERVAL_TIMEOUT=90` 并重启应用容器。
+  - 前端版本更新为 `image-timeout-motion-20260627`：`IMAGE_REQUEST_TIMEOUT_MS=90000`，单次 Images API 请求超过 90 秒无响应会主动中断并重试。
+  - 前端直接注入 `.gen-spinner` / `.gen-btn-spin` 动画样式，避免静态 CSS 缓存或 iframe 样式问题导致生成动画看起来不转。
+- 排查 PeterAI 画图页“生成成功但主界面显示生成失败”的问题：
+  - 用户看到的错误为 `$(...).forEach is not a function`。
+  - 根因候选之一是历史记录渲染中误用单元素选择器 `$()` 后调用 `.forEach()`；该异常会从 `saveToHistory()` 冒泡到生成流程外层 `catch`，导致已生成图片的主界面被覆盖成“生成失败”。
+  - 维护时必须确认实际公网加载的 `main.js`，不能只检查本地 `/home/aihub/Peter_ws/image-generator-main.js`。
+- 已确认当前自定义菜单中的画图 iframe URL 来自数据库 `settings.custom_menu_items`：
+  - `https://api.peterai.cc.cd/image-generator/`
+  - 不是 `127.0.0.1:18080`，也不是 `api.peteraix.com`。
+- 画图页静态覆盖路径：
+  - 容器内：`/app/data/public/image-generator/`
+  - Docker volume：`peter-sub2api_sub2api_data`
+- 验证公网画图页时必须检查：
+  - `curl -k -sS https://api.peterai.cc.cd/image-generator/`
+  - `main.js` 查询参数是否已换版本号。
+  - 公网 `main.js` 中 `single_dollar_forEach = 0`。
+- 历史记录功能修复目标：
+  - 生成成功后主画图界面保留结果，不被历史保存/渲染异常覆盖。
+  - 历史记录缩略图可打开预览。
+  - 新历史记录保存原图后可下载原图、发布画廊、填入文生图提示词。
+  - 旧历史记录如果没有原图数据，只能提示原图不可用，不能用缩略图冒充原图。
 
 ### 2026-06-23
 

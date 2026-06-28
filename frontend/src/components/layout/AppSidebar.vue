@@ -73,7 +73,11 @@
               v-else
               :to="item.path"
               class="sidebar-link mb-1"
-              :class="{ 'sidebar-link-active': isActive(item.path), 'sidebar-link-collapsed': sidebarCollapsed }"
+              :class="{
+                'sidebar-link-active': isActive(item.path),
+                'sidebar-link-collapsed': sidebarCollapsed,
+                'sidebar-link-featured': item.path === '/tutorial'
+              }"
               :title="sidebarCollapsed ? item.label : undefined"
               :id="
                 item.path === '/admin/accounts'
@@ -106,7 +110,11 @@
             :key="item.path"
             :to="item.path"
             class="sidebar-link mb-1"
-            :class="{ 'sidebar-link-active': isActive(item.path), 'sidebar-link-collapsed': sidebarCollapsed }"
+            :class="{
+              'sidebar-link-active': isActive(item.path),
+              'sidebar-link-collapsed': sidebarCollapsed,
+              'sidebar-link-featured': item.path === '/tutorial'
+            }"
             :title="sidebarCollapsed ? item.label : undefined"
             :data-tour="item.path === '/keys' ? 'sidebar-my-keys' : undefined"
             @click="handleMenuItemClick(item.path)"
@@ -126,7 +134,11 @@
             :key="item.path"
             :to="item.path"
             class="sidebar-link mb-1"
-            :class="{ 'sidebar-link-active': isActive(item.path), 'sidebar-link-collapsed': sidebarCollapsed }"
+            :class="{
+              'sidebar-link-active': isActive(item.path),
+              'sidebar-link-collapsed': sidebarCollapsed,
+              'sidebar-link-featured': item.path === '/tutorial'
+            }"
             :title="sidebarCollapsed ? item.label : undefined"
             :data-tour="item.path === '/keys' ? 'sidebar-my-keys' : undefined"
             @click="handleMenuItemClick(item.path)"
@@ -273,6 +285,21 @@ const KeyIcon = {
           'stroke-linecap': 'round',
           'stroke-linejoin': 'round',
           d: 'M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1121.75 8.25z'
+        })
+      ]
+    )
+}
+
+const BookIcon = {
+  render: () =>
+    h(
+      'svg',
+      { fill: 'none', viewBox: '0 0 24 24', stroke: 'currentColor', 'stroke-width': '1.5' },
+      [
+        h('path', {
+          'stroke-linecap': 'round',
+          'stroke-linejoin': 'round',
+          d: 'M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25'
         })
       ]
     )
@@ -681,6 +708,7 @@ function buildSelfNavItems(withDashboard: boolean): NavItem[] {
   }
   items.push(
     { path: '/keys', label: t('nav.apiKeys'), icon: KeyIcon },
+    { path: '/tutorial', label: t('nav.tutorial'), icon: BookIcon },
     { path: '/usage', label: t('nav.usage'), icon: ChartIcon, hideInSimpleMode: true },
     { path: '/available-channels', label: t('nav.availableChannels'), icon: ChannelIcon, hideInSimpleMode: true, featureFlag: flagAvailableChannels },
     { path: '/monitor', label: t('nav.channelStatus'), icon: SignalIcon, featureFlag: flagChannelMonitor },
@@ -1023,6 +1051,44 @@ onMounted(() => {
   opacity: 0;
   transform: translateX(-4px);
   pointer-events: none;
+}
+
+.sidebar-link-featured {
+  border-color: transparent;
+  background: transparent;
+  color: rgb(133 77 14);
+}
+
+.sidebar-link-featured:hover {
+  border-color: transparent;
+  background: transparent;
+  color: rgb(113 63 18);
+}
+
+.sidebar-link-featured.sidebar-link-active {
+  border-color: transparent;
+  background: transparent;
+  color: rgb(113 63 18);
+  box-shadow: none;
+}
+
+.dark .sidebar-link-featured {
+  border-color: transparent;
+  background: transparent;
+  color: rgb(202 138 4);
+}
+
+.dark .sidebar-link-featured:hover {
+  border-color: transparent;
+  background: transparent;
+  color: rgb(217 119 6);
+}
+
+.dark .sidebar-link-featured.sidebar-link-active {
+  border-color: transparent;
+  background: transparent;
+  color: rgb(217 119 6);
+  box-shadow: none;
 }
 
 /* Custom SVG icon in sidebar: constrain size without overriding uploaded SVG colors */

@@ -30,3 +30,11 @@ describe('AppSidebar header styles', () => {
     expect(sidebarBrandBlockMatch?.[0]).not.toContain('overflow: hidden;')
   })
 })
+
+describe('AppSidebar tutorial entry', () => {
+  it('registers the usage tutorial in the self navigation items', () => {
+    expect(componentSource).toContain("path: '/tutorial'")
+    expect(componentSource).toContain("label: t('nav.tutorial')")
+    expect(componentSource).toContain("'sidebar-link-featured': item.path === '/tutorial'")
+  })
+})

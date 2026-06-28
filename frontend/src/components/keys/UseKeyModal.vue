@@ -139,6 +139,7 @@ import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { useClipboard } from '@/composables/useClipboard'
+import { buildClaudeCodeConfigFiles, buildCodexConfigFiles } from '@/utils/clientConfig'
 import type { GroupPlatform } from '@/types'
 
 interface Props {
@@ -434,53 +435,16 @@ const currentFiles = computed((): FileConfig[] => {
 })
 
 function generateAnthropicFiles(baseUrl: string, apiKey: string): FileConfig[] {
-  let path: string
-  let content: string
-
-  switch (activeTab.value) {
-    case 'unix':
-      path = 'Terminal'
-      content = `export ANTHROPIC_BASE_URL="${baseUrl}"
-export ANTHROPIC_AUTH_TOKEN="${apiKey}"
-export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
-export CLAUDE_CODE_ATTRIBUTION_HEADER=0`
-      break
-    case 'cmd':
-      path = 'Command Prompt'
-      content = `set ANTHROPIC_BASE_URL=${baseUrl}
-set ANTHROPIC_AUTH_TOKEN=${apiKey}
-set CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
-set CLAUDE_CODE_ATTRIBUTION_HEADER=0`
-      break
-    case 'powershell':
-      path = 'PowerShell'
-      content = `$env:ANTHROPIC_BASE_URL="${baseUrl}"
-$env:ANTHROPIC_AUTH_TOKEN="${apiKey}"
-$env:CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
-$env:CLAUDE_CODE_ATTRIBUTION_HEADER=0`
-      break
-    default:
-      path = 'Terminal'
-      content = ''
-  }
-
-  const vscodeSettingsPath = activeTab.value === 'unix'
-    ? '~/.claude/settings.json'
-    : '%userprofile%\\.claude\\settings.json'
-
-  const vscodeContent = `{
-  "env": {
-    "ANTHROPIC_BASE_URL": "${baseUrl}",
-    "ANTHROPIC_AUTH_TOKEN": "${apiKey}",
-    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
-    "CLAUDE_CODE_ATTRIBUTION_HEADER": "0"
-  }
-}`
-
-  return [
-    { path, content },
-    { path: vscodeSettingsPath, content: vscodeContent, hint: 'VSCode Claude Code' }
-  ]
+  return buildClaudeCodeConfigFiles({
+    baseUrl,
+    apiKey,
+    os: activeTab.value === 'powershell'
+      ? 'powershell'
+      : activeTab.value === 'cmd'
+        ? 'cmd'
+        : 'unix',
+    settingsHint: 'VSCode Claude Code',
+  })
 }
 
 function generateGeminiCliContent(baseUrl: string, apiKey: string): FileConfig {
@@ -529,85 +493,22 @@ ${keyword('$env:')}${variable('GEMINI_MODEL')}${operator('=')}${string(`"${model
 }
 
 function generateOpenAIFiles(baseUrl: string, apiKey: string): FileConfig[] {
-  const isWindows = activeTab.value === 'windows'
-  const configDir = isWindows ? '%userprofile%\\.codex' : '~/.codex'
-
-  // config.toml content
-  const configContent = `model_provider = "OpenAI"
-model = "gpt-5.5"
-review_model = "gpt-5.5"
-model_reasoning_effort = "xhigh"
-disable_response_storage = true
-network_access = "enabled"
-windows_wsl_setup_acknowledged = true
-
-[model_providers.OpenAI]
-name = "OpenAI"
-base_url = "${baseUrl}"
-wire_api = "responses"
-requires_openai_auth = true
-
-[features]
-goals = true`
-
-  // auth.json content
-  const authContent = `{
-  "OPENAI_API_KEY": "${apiKey}"
-}`
-
-  return [
-    {
-      path: `${configDir}/config.toml`,
-      content: configContent,
-      hint: t('keys.useKeyModal.openai.configTomlHint')
-    },
-    {
-      path: `${configDir}/auth.json`,
-      content: authContent
-    }
-  ]
+  return buildCodexConfigFiles({
+    baseUrl,
+    apiKey,
+    os: activeTab.value === 'windows' ? 'windows' : 'unix',
+    configTomlHint: t('keys.useKeyModal.openai.configTomlHint')
+  })
 }
 
 function generateOpenAIWsFiles(baseUrl: string, apiKey: string): FileConfig[] {
-  const isWindows = activeTab.value === 'windows'
-  const configDir = isWindows ? '%userprofile%\\.codex' : '~/.codex'
-
-  // config.toml content with WebSocket v2
-  const configContent = `model_provider = "OpenAI"
-model = "gpt-5.5"
-review_model = "gpt-5.5"
-model_reasoning_effort = "xhigh"
-disable_response_storage = true
-network_access = "enabled"
-windows_wsl_setup_acknowledged = true
-
-[model_providers.OpenAI]
-name = "OpenAI"
-base_url = "${baseUrl}"
-wire_api = "responses"
-supports_websockets = true
-requires_openai_auth = true
-
-[features]
-responses_websockets_v2 = true
-goals = true`
-
-  // auth.json content
-  const authContent = `{
-  "OPENAI_API_KEY": "${apiKey}"
-}`
-
-  return [
-    {
-      path: `${configDir}/config.toml`,
-      content: configContent,
-      hint: t('keys.useKeyModal.openai.configTomlHint')
-    },
-    {
-      path: `${configDir}/auth.json`,
-      content: authContent
-    }
-  ]
+  return buildCodexConfigFiles({
+    baseUrl,
+    apiKey,
+    os: activeTab.value === 'windows' ? 'windows' : 'unix',
+    websocket: true,
+    configTomlHint: t('keys.useKeyModal.openai.configTomlHint')
+  })
 }
 
 function generateOpenCodeConfig(platform: string, baseUrl: string, apiKey: string, pathLabel?: string): FileConfig {
