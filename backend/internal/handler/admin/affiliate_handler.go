@@ -7,6 +7,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/timezone"
+	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
 	"github.com/gin-gonic/gin"
@@ -201,6 +202,119 @@ func (h *AffiliateHandler) GetUserOverview(c *gin.Context) {
 	response.Success(c, overview)
 }
 
+// ListHierarchyRoots returns users that can be selected as a hierarchy root.
+// GET /api/v1/admin/affiliates/hierarchy/roots
+func (h *AffiliateHandler) ListHierarchyRoots(c *gin.Context) {
+	limit := parsePositiveIntQuery(c.Query("limit"), 20)
+	roots, err := h.affiliateService.AdminListHierarchyRoots(c.Request.Context(), service.AffiliateHierarchyRootFilter{
+		Search: c.Query("search"),
+		Limit:  limit,
+	})
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, roots)
+}
+
+// GetHierarchy returns a flat tree table for one affiliate root.
+// GET /api/v1/admin/affiliates/hierarchy
+func (h *AffiliateHandler) GetHierarchy(c *gin.Context) {
+	rootUserID, err := strconv.ParseInt(c.Query("root_user_id"), 10, 64)
+	if err != nil || rootUserID <= 0 {
+		response.BadRequest(c, "root_user_id is required")
+		return
+	}
+
+	userTZ := c.Query("timezone")
+	filter := service.AffiliateHierarchyFilter{
+		RootUserID: rootUserID,
+		Search:     c.Query("search"),
+		MaxDepth:   parsePositiveIntQuery(c.Query("max_depth"), 20),
+		Limit:      parsePositiveIntQuery(c.Query("limit"), 2000),
+	}
+	if t := parseAffiliateRecordStartTime(c.Query("start_at"), userTZ); t != nil {
+		filter.StartAt = t
+	}
+	if t := parseAffiliateRecordEndTime(c.Query("end_at"), userTZ); t != nil {
+		filter.EndAt = t
+	}
+
+	report, err := h.affiliateService.AdminGetHierarchy(c.Request.Context(), filter)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, report)
+}
+
+// UpdateHierarchyUserRate updates one user's agent rebate rate from the
+// hierarchy page. Backend enforces parent/child caps.
+// PUT /api/v1/admin/affiliates/hierarchy/users/:user_id/rate
+type UpdateHierarchyUserRateRequest struct {
+	AffRebateRatePercent *float64 `json:"aff_rebate_rate_percent"`
+	ClearRebateRate      bool     `json:"clear_rebate_rate"`
+}
+
+func (h *AffiliateHandler) UpdateHierarchyUserRate(c *gin.Context) {
+	userID, err := strconv.ParseInt(c.Param("user_id"), 10, 64)
+	if err != nil || userID <= 0 {
+		response.BadRequest(c, "Invalid user_id")
+		return
+	}
+
+	var req UpdateHierarchyUserRateRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	if !req.ClearRebateRate && req.AffRebateRatePercent == nil {
+		response.BadRequest(c, "aff_rebate_rate_percent is required unless clear_rebate_rate=true")
+		return
+	}
+	rate := req.AffRebateRatePercent
+	if req.ClearRebateRate {
+		rate = nil
+	}
+	if err := h.affiliateService.AdminSetHierarchyUserRebateRate(c.Request.Context(), userID, rate); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, gin.H{"user_id": userID})
+}
+
+// UpdateHierarchyUserAccess enables or disables a user's access to the future
+// user-side agent hierarchy page.
+// PUT /api/v1/admin/affiliates/hierarchy/users/:user_id/access
+type UpdateHierarchyUserAccessRequest struct {
+	Enabled bool   `json:"enabled"`
+	Notes   string `json:"notes"`
+}
+
+func (h *AffiliateHandler) UpdateHierarchyUserAccess(c *gin.Context) {
+	userID, err := strconv.ParseInt(c.Param("user_id"), 10, 64)
+	if err != nil || userID <= 0 {
+		response.BadRequest(c, "Invalid user_id")
+		return
+	}
+
+	var req UpdateHierarchyUserAccessRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+
+	var adminID int64
+	if subject, ok := middleware2.GetAuthSubjectFromContext(c); ok {
+		adminID = subject.UserID
+	}
+	if err := h.affiliateService.AdminSetAgentAccess(c.Request.Context(), userID, req.Enabled, req.Notes, adminID); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, gin.H{"user_id": userID, "enabled": req.Enabled})
+}
+
 // ListInviteRecords returns all inviter-invitee relationships.
 // GET /api/v1/admin/affiliates/invites
 func (h *AffiliateHandler) ListInviteRecords(c *gin.Context) {
@@ -288,4 +402,16 @@ func parseAffiliateRecordEndTime(raw string, userTZ string) *time.Time {
 		return &end
 	}
 	return nil
+}
+
+func parsePositiveIntQuery(raw string, fallback int) int {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return fallback
+	}
+	v, err := strconv.Atoi(raw)
+	if err != nil || v <= 0 {
+		return fallback
+	}
+	return v
 }

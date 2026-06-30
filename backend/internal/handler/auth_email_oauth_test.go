@@ -395,6 +395,10 @@ func (r *oauthEmailAffiliateRepoStub) AccrueQuota(context.Context, int64, int64,
 	panic("unexpected AccrueQuota call")
 }
 
+func (r *oauthEmailAffiliateRepoStub) AccrueHierarchicalQuota(context.Context, []service.AffiliateRebatePayout, int) (int, error) {
+	panic("unexpected AccrueHierarchicalQuota call")
+}
+
 func (r *oauthEmailAffiliateRepoStub) GetAccruedRebateFromInvitee(context.Context, int64, int64) (float64, error) {
 	panic("unexpected GetAccruedRebateFromInvitee call")
 }
@@ -445,6 +449,26 @@ func (r *oauthEmailAffiliateRepoStub) ListAffiliateTransferRecords(context.Conte
 
 func (r *oauthEmailAffiliateRepoStub) GetAffiliateUserOverview(context.Context, int64) (*service.AffiliateUserOverview, error) {
 	panic("unexpected GetAffiliateUserOverview call")
+}
+
+func (r *oauthEmailAffiliateRepoStub) GetMaxDirectChildRebateRate(context.Context, int64, float64) (float64, bool, error) {
+	panic("unexpected GetMaxDirectChildRebateRate call")
+}
+
+func (r *oauthEmailAffiliateRepoStub) ListAffiliateHierarchyRoots(context.Context, service.AffiliateHierarchyRootFilter, float64) ([]service.AffiliateHierarchyRoot, error) {
+	panic("unexpected ListAffiliateHierarchyRoots call")
+}
+
+func (r *oauthEmailAffiliateRepoStub) GetAffiliateHierarchy(context.Context, service.AffiliateHierarchyFilter, float64) (*service.AffiliateHierarchyReport, error) {
+	panic("unexpected GetAffiliateHierarchy call")
+}
+
+func (r *oauthEmailAffiliateRepoStub) GetAgentAccess(context.Context, int64, float64) (*service.AffiliateAgentAccess, error) {
+	panic("unexpected GetAgentAccess call")
+}
+
+func (r *oauthEmailAffiliateRepoStub) SetAgentAccess(context.Context, int64, bool, string, int64) error {
+	panic("unexpected SetAgentAccess call")
 }
 
 func findSetCookieValue(cookies []*http.Cookie, name string) string {

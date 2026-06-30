@@ -91,6 +91,24 @@ func (r *paymentFulfillmentAffiliateRepoStub) AccrueQuota(_ context.Context, inv
 	return true, nil
 }
 
+func (r *paymentFulfillmentAffiliateRepoStub) AccrueHierarchicalQuota(_ context.Context, payouts []AffiliateRebatePayout, freezeHours int) (int, error) {
+	for _, payout := range payouts {
+		var sourceCopy *int64
+		if payout.SourceOrderID != nil {
+			v := *payout.SourceOrderID
+			sourceCopy = &v
+		}
+		r.accrueCalls = append(r.accrueCalls, paymentFulfillmentAffiliateAccrueCall{
+			inviterID:     payout.UserID,
+			inviteeUserID: payout.SourceUserID,
+			amount:        payout.Amount,
+			freezeHours:   freezeHours,
+			sourceOrderID: sourceCopy,
+		})
+	}
+	return len(payouts), nil
+}
+
 func (r *paymentFulfillmentAffiliateRepoStub) GetAccruedRebateFromInvitee(context.Context, int64, int64) (float64, error) {
 	return 0, nil
 }
@@ -141,6 +159,26 @@ func (r *paymentFulfillmentAffiliateRepoStub) ListAffiliateTransferRecords(conte
 
 func (r *paymentFulfillmentAffiliateRepoStub) GetAffiliateUserOverview(context.Context, int64) (*AffiliateUserOverview, error) {
 	panic("unexpected GetAffiliateUserOverview call")
+}
+
+func (r *paymentFulfillmentAffiliateRepoStub) GetMaxDirectChildRebateRate(context.Context, int64, float64) (float64, bool, error) {
+	panic("unexpected GetMaxDirectChildRebateRate call")
+}
+
+func (r *paymentFulfillmentAffiliateRepoStub) ListAffiliateHierarchyRoots(context.Context, AffiliateHierarchyRootFilter, float64) ([]AffiliateHierarchyRoot, error) {
+	panic("unexpected ListAffiliateHierarchyRoots call")
+}
+
+func (r *paymentFulfillmentAffiliateRepoStub) GetAffiliateHierarchy(context.Context, AffiliateHierarchyFilter, float64) (*AffiliateHierarchyReport, error) {
+	panic("unexpected GetAffiliateHierarchy call")
+}
+
+func (r *paymentFulfillmentAffiliateRepoStub) GetAgentAccess(context.Context, int64, float64) (*AffiliateAgentAccess, error) {
+	panic("unexpected GetAgentAccess call")
+}
+
+func (r *paymentFulfillmentAffiliateRepoStub) SetAgentAccess(context.Context, int64, bool, string, int64) error {
+	panic("unexpected SetAgentAccess call")
 }
 
 type paymentFulfillmentSettingRepoStub struct {

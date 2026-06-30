@@ -162,6 +162,90 @@ VALUES ($1, 'accrue', $2, $3, $4, NOW(), NOW())`, inviterID, amount, inviteeUser
 	return applied, nil
 }
 
+func (r *affiliateRepository) AccrueHierarchicalQuota(ctx context.Context, payouts []service.AffiliateRebatePayout, freezeHours int) (int, error) {
+	if len(payouts) == 0 {
+		return 0, nil
+	}
+
+	applied := 0
+	err := r.withTx(ctx, func(txCtx context.Context, txClient *dbent.Client) error {
+		for _, payout := range payouts {
+			if payout.UserID <= 0 || payout.SourceUserID <= 0 || payout.Amount <= 0 {
+				continue
+			}
+
+			var updateSQL string
+			if freezeHours > 0 {
+				updateSQL = "UPDATE user_affiliates SET aff_frozen_quota = aff_frozen_quota + $1, aff_history_quota = aff_history_quota + $1, updated_at = NOW() WHERE user_id = $2"
+			} else {
+				updateSQL = "UPDATE user_affiliates SET aff_quota = aff_quota + $1, aff_history_quota = aff_history_quota + $1, updated_at = NOW() WHERE user_id = $2"
+			}
+			res, err := txClient.ExecContext(txCtx, updateSQL, payout.Amount, payout.UserID)
+			if err != nil {
+				return fmt.Errorf("update affiliate hierarchical quota: %w", err)
+			}
+			affected, _ := res.RowsAffected()
+			if affected == 0 {
+				return service.ErrAffiliateProfileNotFound
+			}
+
+			if _, err = txClient.ExecContext(txCtx, `
+INSERT INTO user_affiliate_ledger (
+    user_id,
+    action,
+    amount,
+    source_user_id,
+    source_order_id,
+    affiliate_level,
+    downstream_user_id,
+    rebate_base_amount,
+    rebate_rate_percent,
+    recipient_rate_percent,
+    downstream_rate_percent,
+    frozen_until,
+    created_at,
+    updated_at
+)
+VALUES (
+    $1,
+    'accrue',
+    $2,
+    $3,
+    $4,
+    $5,
+    $6,
+    $7,
+    $8,
+    $9,
+    $10,
+    CASE WHEN $11::integer > 0 THEN NOW() + make_interval(hours => $11) ELSE NULL END,
+    NOW(),
+    NOW()
+)`,
+				payout.UserID,
+				payout.Amount,
+				payout.SourceUserID,
+				nullableInt64Arg(payout.SourceOrderID),
+				payout.AffiliateLevel,
+				payout.DownstreamUserID,
+				payout.RebateBaseAmount,
+				payout.RebateRatePercent,
+				payout.RecipientRatePercent,
+				payout.DownstreamRatePercent,
+				freezeHours,
+			); err != nil {
+				return fmt.Errorf("insert affiliate hierarchical accrue ledger: %w", err)
+			}
+			applied++
+		}
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+	return applied, nil
+}
+
 func (r *affiliateRepository) GetAccruedRebateFromInvitee(ctx context.Context, inviterID, inviteeUserID int64) (float64, error) {
 	client := clientFromContext(ctx, r.client)
 	rows, err := client.QueryContext(ctx,
@@ -672,6 +756,453 @@ func (r *affiliateRepository) GetAffiliateUserOverview(ctx context.Context, user
 	return &overview, rows.Err()
 }
 
+func (r *affiliateRepository) GetMaxDirectChildRebateRate(ctx context.Context, userID int64, globalRate float64) (float64, bool, error) {
+	if userID <= 0 {
+		return 0, false, nil
+	}
+	client := clientFromContext(ctx, r.client)
+	rows, err := client.QueryContext(ctx, `
+SELECT MAX(COALESCE(aff_rebate_rate_percent, $2))::double precision,
+       COUNT(*)::integer
+FROM user_affiliates
+WHERE inviter_id = $1`, userID, globalRate)
+	if err != nil {
+		return 0, false, fmt.Errorf("query max direct child rebate rate: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	if !rows.Next() {
+		return 0, false, rows.Err()
+	}
+	var maxRate sql.NullFloat64
+	var childCount int
+	if err := rows.Scan(&maxRate, &childCount); err != nil {
+		return 0, false, err
+	}
+	if childCount == 0 || !maxRate.Valid {
+		return 0, false, rows.Err()
+	}
+	return maxRate.Float64, true, rows.Err()
+}
+
+func (r *affiliateRepository) ListAffiliateHierarchyRoots(ctx context.Context, filter service.AffiliateHierarchyRootFilter, globalRate float64) ([]service.AffiliateHierarchyRoot, error) {
+	limit := filter.Limit
+	if limit <= 0 {
+		limit = 20
+	}
+	search := strings.TrimSpace(filter.Search)
+	likePattern := "%" + search + "%"
+
+	client := clientFromContext(ctx, r.client)
+	rows, err := client.QueryContext(ctx, `
+WITH RECURSIVE candidates AS (
+    SELECT ua.user_id,
+           COALESCE(u.email, '') AS email,
+           COALESCE(u.username, '') AS username,
+           ua.aff_code,
+           COALESCE(ua.aff_rebate_rate_percent, $3)::double precision AS effective_rebate_rate_percent,
+           COALESCE(aaa.enabled, false) AS agent_access_enabled,
+           ua.aff_count,
+           ua.updated_at
+    FROM user_affiliates ua
+    JOIN users u ON u.id = ua.user_id
+    LEFT JOIN affiliate_agent_access aaa ON aaa.user_id = ua.user_id
+    WHERE ($1 = ''
+       OR u.email ILIKE $2
+       OR u.username ILIKE $2
+       OR ua.aff_code ILIKE $2
+       OR ua.user_id::text = $1)
+    ORDER BY ua.aff_count DESC, ua.updated_at DESC, ua.user_id ASC
+    LIMIT $4
+),
+descendants(root_user_id, user_id, path, depth) AS (
+    SELECT c.user_id, c.user_id, ARRAY[c.user_id]::bigint[], 0
+    FROM candidates c
+    UNION ALL
+    SELECT d.root_user_id,
+           child.user_id,
+           d.path || child.user_id,
+           d.depth + 1
+    FROM descendants d
+    JOIN user_affiliates child ON child.inviter_id = d.user_id
+    WHERE d.depth < 20
+      AND NOT child.user_id = ANY(d.path)
+),
+direct_counts AS (
+    SELECT inviter_id AS user_id, COUNT(*)::integer AS direct_invite_count
+    FROM user_affiliates
+    WHERE inviter_id IN (SELECT user_id FROM candidates)
+    GROUP BY inviter_id
+),
+team_counts AS (
+    SELECT root_user_id, GREATEST(COUNT(*) - 1, 0)::integer AS team_size
+    FROM descendants
+    GROUP BY root_user_id
+)
+SELECT c.user_id,
+       c.email,
+       c.username,
+       c.aff_code,
+       c.effective_rebate_rate_percent,
+       COALESCE(dc.direct_invite_count, 0),
+       COALESCE(tc.team_size, 0),
+       c.agent_access_enabled
+FROM candidates c
+LEFT JOIN direct_counts dc ON dc.user_id = c.user_id
+LEFT JOIN team_counts tc ON tc.root_user_id = c.user_id
+ORDER BY c.aff_count DESC, c.updated_at DESC, c.user_id ASC`, search, likePattern, globalRate, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list affiliate hierarchy roots: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	items := make([]service.AffiliateHierarchyRoot, 0)
+	for rows.Next() {
+		var item service.AffiliateHierarchyRoot
+		if err := rows.Scan(
+			&item.UserID,
+			&item.Email,
+			&item.Username,
+			&item.AffCode,
+			&item.EffectiveRebateRatePercent,
+			&item.DirectInviteCount,
+			&item.TeamSize,
+			&item.AgentAccessEnabled,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+func (r *affiliateRepository) GetAffiliateHierarchy(ctx context.Context, filter service.AffiliateHierarchyFilter, globalRate float64) (*service.AffiliateHierarchyReport, error) {
+	limit := filter.Limit
+	if limit <= 0 {
+		limit = 2000
+	}
+	maxDepth := filter.MaxDepth
+	if maxDepth <= 0 {
+		maxDepth = 20
+	}
+	search := strings.TrimSpace(filter.Search)
+	likePattern := "%" + search + "%"
+
+	client := clientFromContext(ctx, r.client)
+	rows, err := client.QueryContext(ctx, `
+WITH RECURSIVE tree AS (
+    SELECT ua.user_id,
+           ua.inviter_id,
+           COALESCE(u.email, '') AS email,
+           COALESCE(u.username, '') AS username,
+           ua.aff_code,
+           COALESCE(ua.aff_rebate_rate_percent, $5)::double precision AS effective_rebate_rate_percent,
+           (ua.aff_rebate_rate_percent IS NOT NULL) AS rebate_rate_custom,
+           0::integer AS depth,
+           ARRAY[ua.user_id]::bigint[] AS path
+    FROM user_affiliates ua
+    JOIN users u ON u.id = ua.user_id
+    WHERE ua.user_id = $1
+
+    UNION ALL
+
+    SELECT child.user_id,
+           child.inviter_id,
+           COALESCE(u.email, '') AS email,
+           COALESCE(u.username, '') AS username,
+           child.aff_code,
+           COALESCE(child.aff_rebate_rate_percent, $5)::double precision AS effective_rebate_rate_percent,
+           (child.aff_rebate_rate_percent IS NOT NULL) AS rebate_rate_custom,
+           tree.depth + 1,
+           tree.path || child.user_id
+    FROM tree
+    JOIN user_affiliates child ON child.inviter_id = tree.user_id
+    JOIN users u ON u.id = child.user_id
+    WHERE tree.depth < $2
+      AND NOT child.user_id = ANY(tree.path)
+),
+direct_counts AS (
+    SELECT inviter_id AS user_id, COUNT(*)::integer AS direct_invite_count
+    FROM user_affiliates
+    WHERE inviter_id IN (SELECT user_id FROM tree)
+    GROUP BY inviter_id
+),
+self_recharge AS (
+    SELECT po.user_id,
+           COALESCE(SUM(po.amount), 0)::double precision AS amount
+    FROM payment_orders po
+    WHERE po.user_id IN (SELECT user_id FROM tree)
+      AND po.status = 'COMPLETED'
+      AND po.order_type IN ('balance', 'subscription')
+      AND po.completed_at IS NOT NULL
+      AND ($3::timestamptz IS NULL OR po.completed_at >= $3)
+      AND ($4::timestamptz IS NULL OR po.completed_at <= $4)
+    GROUP BY po.user_id
+),
+rebate_totals AS (
+    SELECT ual.user_id,
+           COALESCE(SUM(ual.amount), 0)::double precision AS amount
+    FROM user_affiliate_ledger ual
+    WHERE ual.user_id IN (SELECT user_id FROM tree)
+      AND ual.action = 'accrue'
+      AND ($3::timestamptz IS NULL OR ual.created_at >= $3)
+      AND ($4::timestamptz IS NULL OR ual.created_at <= $4)
+    GROUP BY ual.user_id
+),
+descendant_stats AS (
+    SELECT parent.user_id,
+           GREATEST(COUNT(child.user_id) - 1, 0)::integer AS team_size,
+           COALESCE(SUM(COALESCE(sr.amount, 0)), 0)::double precision AS team_recharge_amount
+    FROM tree parent
+    JOIN tree child ON parent.user_id = ANY(child.path)
+    LEFT JOIN self_recharge sr ON sr.user_id = child.user_id
+    GROUP BY parent.user_id
+),
+node_stats AS (
+    SELECT t.user_id,
+           t.inviter_id,
+           t.email,
+           t.username,
+           t.aff_code,
+           t.effective_rebate_rate_percent,
+           t.rebate_rate_custom,
+           t.depth,
+           t.path,
+           COALESCE(parent.email, '') AS parent_email,
+           COALESCE(parent.username, '') AS parent_username,
+           COALESCE(dc.direct_invite_count, 0) AS direct_invite_count,
+           COALESCE(ds.team_size, 0) AS team_size,
+           COALESCE(sr.amount, 0)::double precision AS self_recharge_amount,
+           COALESCE(ds.team_recharge_amount, 0)::double precision AS team_recharge_amount,
+           COALESCE(rt.amount, 0)::double precision AS rebate_amount,
+           COALESCE(aaa.enabled, false) AS agent_access_enabled
+    FROM tree t
+    LEFT JOIN users parent ON parent.id = t.inviter_id
+    LEFT JOIN direct_counts dc ON dc.user_id = t.user_id
+    LEFT JOIN descendant_stats ds ON ds.user_id = t.user_id
+    LEFT JOIN self_recharge sr ON sr.user_id = t.user_id
+    LEFT JOIN rebate_totals rt ON rt.user_id = t.user_id
+    LEFT JOIN affiliate_agent_access aaa ON aaa.user_id = t.user_id
+),
+summary AS (
+    SELECT $1::bigint AS root_user_id,
+           COUNT(*)::integer AS node_count,
+           COALESCE(MAX(depth), 0)::integer AS max_depth,
+           COALESCE(MAX(direct_invite_count) FILTER (WHERE user_id = $1), 0)::integer AS direct_invite_count,
+           COALESCE(MAX(team_size) FILTER (WHERE user_id = $1), 0)::integer AS team_size,
+           COALESCE(MAX(self_recharge_amount) FILTER (WHERE user_id = $1), 0)::double precision AS self_recharge_amount,
+           COALESCE(MAX(team_recharge_amount) FILTER (WHERE user_id = $1), 0)::double precision AS team_recharge_amount,
+           COALESCE(MAX(rebate_amount) FILTER (WHERE user_id = $1), 0)::double precision AS rebate_amount
+    FROM node_stats
+)
+SELECT ns.user_id,
+       ns.email,
+       ns.username,
+       ns.aff_code,
+       ns.inviter_id,
+       ns.parent_email,
+       ns.parent_username,
+       ns.depth,
+       ns.path,
+       ns.effective_rebate_rate_percent,
+       ns.rebate_rate_custom,
+       ns.direct_invite_count,
+       ns.team_size,
+       ns.self_recharge_amount,
+       ns.team_recharge_amount,
+       ns.rebate_amount,
+       ns.agent_access_enabled,
+       summary.root_user_id,
+       summary.node_count,
+       summary.max_depth,
+       summary.direct_invite_count,
+       summary.team_size,
+       summary.self_recharge_amount,
+       summary.team_recharge_amount,
+       summary.rebate_amount
+FROM summary
+LEFT JOIN LATERAL (
+    SELECT *
+    FROM node_stats
+    WHERE ($6 = ''
+       OR email ILIKE $7
+       OR username ILIKE $7
+       OR aff_code ILIKE $7
+       OR user_id::text = $6
+       OR inviter_id::text = $6)
+    ORDER BY path ASC
+    LIMIT $8
+) ns ON TRUE
+ORDER BY ns.path ASC NULLS LAST`, filter.RootUserID, maxDepth, nullableTimeArg(filter.StartAt), nullableTimeArg(filter.EndAt), globalRate, search, likePattern, limit)
+	if err != nil {
+		return nil, fmt.Errorf("get affiliate hierarchy: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	report := &service.AffiliateHierarchyReport{
+		Nodes: []service.AffiliateHierarchyNode{},
+		Summary: service.AffiliateHierarchySummary{
+			RootUserID: filter.RootUserID,
+		},
+	}
+	for rows.Next() {
+		var nodeUserID sql.NullInt64
+		var email sql.NullString
+		var username sql.NullString
+		var affCode sql.NullString
+		var inviterID sql.NullInt64
+		var parentEmail sql.NullString
+		var parentUsername sql.NullString
+		var depth sql.NullInt64
+		var path pq.Int64Array
+		var effectiveRate sql.NullFloat64
+		var rebateRateCustom sql.NullBool
+		var directInviteCount sql.NullInt64
+		var teamSize sql.NullInt64
+		var selfRecharge sql.NullFloat64
+		var teamRecharge sql.NullFloat64
+		var rebateAmount sql.NullFloat64
+		var agentAccessEnabled sql.NullBool
+		var summary service.AffiliateHierarchySummary
+		if err := rows.Scan(
+			&nodeUserID,
+			&email,
+			&username,
+			&affCode,
+			&inviterID,
+			&parentEmail,
+			&parentUsername,
+			&depth,
+			&path,
+			&effectiveRate,
+			&rebateRateCustom,
+			&directInviteCount,
+			&teamSize,
+			&selfRecharge,
+			&teamRecharge,
+			&rebateAmount,
+			&agentAccessEnabled,
+			&summary.RootUserID,
+			&summary.NodeCount,
+			&summary.MaxDepth,
+			&summary.DirectInviteCount,
+			&summary.TeamSize,
+			&summary.SelfRechargeAmount,
+			&summary.TeamRechargeAmount,
+			&summary.RebateAmount,
+		); err != nil {
+			return nil, err
+		}
+		report.Summary = summary
+		if !nodeUserID.Valid {
+			continue
+		}
+		node := service.AffiliateHierarchyNode{
+			UserID:                     nodeUserID.Int64,
+			Email:                      email.String,
+			Username:                   username.String,
+			AffCode:                    affCode.String,
+			ParentEmail:                parentEmail.String,
+			ParentUsername:             parentUsername.String,
+			Depth:                      int(depth.Int64),
+			Path:                       []int64(path),
+			EffectiveRebateRatePercent: effectiveRate.Float64,
+			RebateRateCustom:           rebateRateCustom.Bool,
+			DirectInviteCount:          int(directInviteCount.Int64),
+			TeamSize:                   int(teamSize.Int64),
+			SelfRechargeAmount:         selfRecharge.Float64,
+			TeamRechargeAmount:         teamRecharge.Float64,
+			RebateAmount:               rebateAmount.Float64,
+			AgentAccessEnabled:         agentAccessEnabled.Bool,
+		}
+		if inviterID.Valid {
+			node.InviterID = &inviterID.Int64
+		}
+		report.Nodes = append(report.Nodes, node)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return report, nil
+}
+
+func (r *affiliateRepository) GetAgentAccess(ctx context.Context, userID int64, globalRate float64) (*service.AffiliateAgentAccess, error) {
+	if userID <= 0 {
+		return nil, nil
+	}
+	client := clientFromContext(ctx, r.client)
+	rows, err := client.QueryContext(ctx, `
+SELECT ua.user_id,
+       COALESCE(u.email, ''),
+       COALESCE(u.username, ''),
+       ua.aff_code,
+       COALESCE(ua.aff_rebate_rate_percent, $2)::double precision AS effective_rebate_rate_percent,
+       COALESCE(aaa.enabled, false) AS enabled,
+       COALESCE(aaa.notes, '') AS notes,
+       aaa.created_by_admin_id,
+       COALESCE(aaa.created_at, ua.created_at) AS created_at,
+       COALESCE(aaa.updated_at, ua.updated_at) AS updated_at
+FROM user_affiliates ua
+JOIN users u ON u.id = ua.user_id
+LEFT JOIN affiliate_agent_access aaa ON aaa.user_id = ua.user_id
+WHERE ua.user_id = $1
+LIMIT 1`, userID, globalRate)
+	if err != nil {
+		return nil, fmt.Errorf("get affiliate agent access: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return nil, err
+		}
+		return nil, nil
+	}
+	var access service.AffiliateAgentAccess
+	var adminID sql.NullInt64
+	if err := rows.Scan(
+		&access.UserID,
+		&access.Email,
+		&access.Username,
+		&access.AffCode,
+		&access.EffectiveRebateRatePercent,
+		&access.Enabled,
+		&access.Notes,
+		&adminID,
+		&access.CreatedAt,
+		&access.UpdatedAt,
+	); err != nil {
+		return nil, err
+	}
+	if adminID.Valid {
+		access.CreatedByAdminID = &adminID.Int64
+	}
+	return &access, rows.Err()
+}
+
+func (r *affiliateRepository) SetAgentAccess(ctx context.Context, userID int64, enabled bool, notes string, adminID int64) error {
+	if userID <= 0 {
+		return service.ErrUserNotFound
+	}
+	client := clientFromContext(ctx, r.client)
+	var adminArg any
+	if adminID > 0 {
+		adminArg = adminID
+	}
+	if _, err := client.ExecContext(ctx, `
+INSERT INTO affiliate_agent_access (user_id, enabled, notes, created_by_admin_id, created_at, updated_at)
+VALUES ($1, $2, $3, $4, NOW(), NOW())
+ON CONFLICT (user_id) DO UPDATE
+SET enabled = EXCLUDED.enabled,
+    notes = EXCLUDED.notes,
+    created_by_admin_id = EXCLUDED.created_by_admin_id,
+    updated_at = NOW()`, userID, enabled, strings.TrimSpace(notes), adminArg); err != nil {
+		return fmt.Errorf("set affiliate agent access: %w", err)
+	}
+	return nil
+}
+
 func buildAffiliateRecordWhere(filter service.AffiliateRecordFilter, timeColumn string, searchColumns []string) (string, []any) {
 	clauses := make([]string, 0, 3)
 	args := make([]any, 0, 3)
@@ -1117,6 +1648,13 @@ func nullableArg(v *float64) any {
 }
 
 func nullableInt64Arg(v *int64) any {
+	if v == nil {
+		return nil
+	}
+	return *v
+}
+
+func nullableTimeArg(v *time.Time) any {
 	if v == nil {
 		return nil
 	}

@@ -2,12 +2,14 @@ package handler
 
 import (
 	"context"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/handler/dto"
 	"github.com/Wei-Shaw/sub2api/internal/handler/quotaview"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/timezone"
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
@@ -211,6 +213,61 @@ func (h *UserHandler) GetAffiliate(c *gin.Context) {
 	response.Success(c, detail)
 }
 
+// GetAffiliateHierarchyAccess returns whether current user may view the
+// user-side agent hierarchy page. It is intentionally non-throwing for
+// disabled access so the frontend can hide the menu quietly.
+// GET /api/v1/user/aff/hierarchy/access
+func (h *UserHandler) GetAffiliateHierarchyAccess(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+	access, err := h.affiliateService.GetMyAgentAccess(c.Request.Context(), subject.UserID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	if access == nil {
+		response.Success(c, gin.H{"user_id": subject.UserID, "enabled": false})
+		return
+	}
+	if !h.affiliateService.IsEnabled(c.Request.Context()) {
+		access.Enabled = false
+	}
+	response.Success(c, access)
+}
+
+// GetAffiliateHierarchy returns the current user's own downstream affiliate
+// hierarchy. The root is always the JWT user; any root_user_id query parameter
+// is ignored to preserve the data boundary for agent accounts.
+// GET /api/v1/user/aff/hierarchy
+func (h *UserHandler) GetAffiliateHierarchy(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+	filter := service.AffiliateHierarchyFilter{
+		Search:   c.Query("search"),
+		MaxDepth: parseUserAffiliatePositiveIntQuery(c.Query("max_depth"), 20),
+		Limit:    parseUserAffiliatePositiveIntQuery(c.Query("limit"), 2000),
+	}
+	userTZ := c.Query("timezone")
+	if t := parseUserAffiliateStartTime(c.Query("start_at"), userTZ); t != nil {
+		filter.StartAt = t
+	}
+	if t := parseUserAffiliateEndTime(c.Query("end_at"), userTZ); t != nil {
+		filter.EndAt = t
+	}
+	report, err := h.affiliateService.GetMyAffiliateHierarchy(c.Request.Context(), subject.UserID, filter)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, report)
+}
+
 // TransferAffiliateQuota transfers all available affiliate quota into current balance.
 // POST /api/v1/user/aff/transfer
 func (h *UserHandler) TransferAffiliateQuota(c *gin.Context) {
@@ -230,6 +287,47 @@ func (h *UserHandler) TransferAffiliateQuota(c *gin.Context) {
 		"transferred_quota": transferred,
 		"balance":           balance,
 	})
+}
+
+func parseUserAffiliateStartTime(raw string, userTZ string) *time.Time {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	if parsed, err := time.Parse(time.RFC3339, raw); err == nil {
+		return &parsed
+	}
+	if parsed, err := timezone.ParseInUserLocation("2006-01-02", raw, userTZ); err == nil {
+		return &parsed
+	}
+	return nil
+}
+
+func parseUserAffiliateEndTime(raw string, userTZ string) *time.Time {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	if parsed, err := time.Parse(time.RFC3339, raw); err == nil {
+		return &parsed
+	}
+	if parsed, err := timezone.ParseInUserLocation("2006-01-02", raw, userTZ); err == nil {
+		end := parsed.AddDate(0, 0, 1).Add(-time.Nanosecond)
+		return &end
+	}
+	return nil
+}
+
+func parseUserAffiliatePositiveIntQuery(raw string, fallback int) int {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return fallback
+	}
+	v, err := strconv.Atoi(raw)
+	if err != nil || v <= 0 {
+		return fallback
+	}
+	return v
 }
 
 type StartIdentityBindingRequest struct {

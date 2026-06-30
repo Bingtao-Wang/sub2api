@@ -17,10 +17,16 @@ var (
 	ErrAffiliateCodeTaken       = infraerrors.Conflict("AFFILIATE_CODE_TAKEN", "affiliate code already in use")
 	ErrAffiliateAlreadyBound    = infraerrors.Conflict("AFFILIATE_ALREADY_BOUND", "affiliate inviter already bound")
 	ErrAffiliateQuotaEmpty      = infraerrors.BadRequest("AFFILIATE_QUOTA_EMPTY", "no affiliate quota available to transfer")
+	ErrAffiliateRateExceedsCap  = infraerrors.BadRequest("AFFILIATE_RATE_EXCEEDS_CAP", "affiliate rebate rate exceeds hierarchy cap")
+	ErrAffiliateDisabled        = infraerrors.Forbidden("AFFILIATE_DISABLED", "affiliate feature is disabled")
+	ErrAgentAccessDenied        = infraerrors.Forbidden("AFFILIATE_AGENT_ACCESS_DENIED", "affiliate agent access is not enabled")
 )
 
 const (
-	affiliateInviteesLimit = 100
+	affiliateInviteesLimit      = 100
+	affiliateHierarchyMaxDepth  = 20
+	affiliateHierarchyMaxLimit  = 2000
+	affiliateHierarchyPageLimit = 500
 	// AffiliateCodeMinLength / AffiliateCodeMaxLength bound both system-generated
 	// 12-char codes and admin-customized codes (e.g. "VIP2026").
 	AffiliateCodeMinLength = 4
@@ -99,6 +105,7 @@ type AffiliateRepository interface {
 	GetAffiliateByCode(ctx context.Context, code string) (*AffiliateSummary, error)
 	BindInviter(ctx context.Context, userID, inviterID int64) (bool, error)
 	AccrueQuota(ctx context.Context, inviterID, inviteeUserID int64, amount float64, freezeHours int, sourceOrderID *int64) (bool, error)
+	AccrueHierarchicalQuota(ctx context.Context, payouts []AffiliateRebatePayout, freezeHours int) (int, error)
 	GetAccruedRebateFromInvitee(ctx context.Context, inviterID, inviteeUserID int64) (float64, error)
 	ThawFrozenQuota(ctx context.Context, userID int64) (float64, error)
 	TransferQuotaToBalance(ctx context.Context, userID int64) (float64, float64, error)
@@ -114,6 +121,11 @@ type AffiliateRepository interface {
 	ListAffiliateRebateRecords(ctx context.Context, filter AffiliateRecordFilter) ([]AffiliateRebateRecord, int64, error)
 	ListAffiliateTransferRecords(ctx context.Context, filter AffiliateRecordFilter) ([]AffiliateTransferRecord, int64, error)
 	GetAffiliateUserOverview(ctx context.Context, userID int64) (*AffiliateUserOverview, error)
+	GetMaxDirectChildRebateRate(ctx context.Context, userID int64, globalRate float64) (float64, bool, error)
+	ListAffiliateHierarchyRoots(ctx context.Context, filter AffiliateHierarchyRootFilter, globalRate float64) ([]AffiliateHierarchyRoot, error)
+	GetAffiliateHierarchy(ctx context.Context, filter AffiliateHierarchyFilter, globalRate float64) (*AffiliateHierarchyReport, error)
+	GetAgentAccess(ctx context.Context, userID int64, globalRate float64) (*AffiliateAgentAccess, error)
+	SetAgentAccess(ctx context.Context, userID int64, enabled bool, notes string, adminID int64) error
 }
 
 // AffiliateAdminFilter 列表筛选条件
@@ -202,6 +214,99 @@ type AffiliateUserOverview struct {
 	RebatedInviteeCount int     `json:"rebated_invitee_count"`
 	AvailableQuota      float64 `json:"available_quota"`
 	HistoryQuota        float64 `json:"history_quota"`
+}
+
+type AffiliateRebatePayout struct {
+	UserID                int64      `json:"user_id"`
+	SourceUserID          int64      `json:"source_user_id"`
+	DownstreamUserID      int64      `json:"downstream_user_id"`
+	AffiliateLevel        int        `json:"affiliate_level"`
+	Amount                float64    `json:"amount"`
+	RebateBaseAmount      float64    `json:"rebate_base_amount"`
+	RebateRatePercent     float64    `json:"rebate_rate_percent"`
+	RecipientRatePercent  float64    `json:"recipient_rate_percent"`
+	DownstreamRatePercent float64    `json:"downstream_rate_percent"`
+	SourceOrderID         *int64     `json:"source_order_id,omitempty"`
+	FrozenUntil           *time.Time `json:"frozen_until,omitempty"`
+}
+
+type AffiliatePaymentRebateResult struct {
+	TotalRebate float64                 `json:"total_rebate"`
+	Payouts     []AffiliateRebatePayout `json:"payouts"`
+}
+
+type AffiliateHierarchyRootFilter struct {
+	Search string
+	Limit  int
+}
+
+type AffiliateHierarchyRoot struct {
+	UserID                     int64   `json:"user_id"`
+	Email                      string  `json:"email"`
+	Username                   string  `json:"username"`
+	AffCode                    string  `json:"aff_code"`
+	EffectiveRebateRatePercent float64 `json:"effective_rebate_rate_percent"`
+	DirectInviteCount          int     `json:"direct_invite_count"`
+	TeamSize                   int     `json:"team_size"`
+	AgentAccessEnabled         bool    `json:"agent_access_enabled"`
+}
+
+type AffiliateHierarchyFilter struct {
+	RootUserID int64
+	Search     string
+	StartAt    *time.Time
+	EndAt      *time.Time
+	MaxDepth   int
+	Limit      int
+}
+
+type AffiliateHierarchyNode struct {
+	UserID                     int64   `json:"user_id"`
+	Email                      string  `json:"email"`
+	Username                   string  `json:"username"`
+	AffCode                    string  `json:"aff_code"`
+	InviterID                  *int64  `json:"inviter_id,omitempty"`
+	ParentEmail                string  `json:"parent_email"`
+	ParentUsername             string  `json:"parent_username"`
+	Depth                      int     `json:"depth"`
+	Path                       []int64 `json:"path"`
+	EffectiveRebateRatePercent float64 `json:"effective_rebate_rate_percent"`
+	RebateRateCustom           bool    `json:"rebate_rate_custom"`
+	DirectInviteCount          int     `json:"direct_invite_count"`
+	TeamSize                   int     `json:"team_size"`
+	SelfRechargeAmount         float64 `json:"self_recharge_amount"`
+	TeamRechargeAmount         float64 `json:"team_recharge_amount"`
+	RebateAmount               float64 `json:"rebate_amount"`
+	AgentAccessEnabled         bool    `json:"agent_access_enabled"`
+}
+
+type AffiliateHierarchySummary struct {
+	RootUserID         int64   `json:"root_user_id"`
+	NodeCount          int     `json:"node_count"`
+	MaxDepth           int     `json:"max_depth"`
+	DirectInviteCount  int     `json:"direct_invite_count"`
+	TeamSize           int     `json:"team_size"`
+	SelfRechargeAmount float64 `json:"self_recharge_amount"`
+	TeamRechargeAmount float64 `json:"team_recharge_amount"`
+	RebateAmount       float64 `json:"rebate_amount"`
+}
+
+type AffiliateHierarchyReport struct {
+	Summary AffiliateHierarchySummary `json:"summary"`
+	Nodes   []AffiliateHierarchyNode  `json:"nodes"`
+}
+
+type AffiliateAgentAccess struct {
+	UserID                     int64     `json:"user_id"`
+	Email                      string    `json:"email"`
+	Username                   string    `json:"username"`
+	AffCode                    string    `json:"aff_code"`
+	EffectiveRebateRatePercent float64   `json:"effective_rebate_rate_percent"`
+	Enabled                    bool      `json:"enabled"`
+	Notes                      string    `json:"notes"`
+	CreatedByAdminID           *int64    `json:"created_by_admin_id,omitempty"`
+	CreatedAt                  time.Time `json:"created_at"`
+	UpdatedAt                  time.Time `json:"updated_at"`
 }
 
 type AffiliateService struct {
@@ -386,6 +491,137 @@ func (s *AffiliateService) AccrueInviteRebateForOrder(ctx context.Context, invit
 	return rebate, nil
 }
 
+func (s *AffiliateService) AccrueInviteRebatesForPaymentOrder(ctx context.Context, inviteeUserID int64, baseRechargeAmount float64, sourceOrderID *int64) (*AffiliatePaymentRebateResult, error) {
+	result := &AffiliatePaymentRebateResult{Payouts: []AffiliateRebatePayout{}}
+	if s == nil || s.repo == nil {
+		return result, nil
+	}
+	if inviteeUserID <= 0 || baseRechargeAmount <= 0 || math.IsNaN(baseRechargeAmount) || math.IsInf(baseRechargeAmount, 0) {
+		return result, nil
+	}
+	if !s.IsEnabled(ctx) {
+		return result, nil
+	}
+
+	chain, err := s.buildAffiliateChain(ctx, inviteeUserID)
+	if err != nil {
+		return nil, err
+	}
+	if len(chain) == 0 {
+		return result, nil
+	}
+
+	perInviteeCap := 0.0
+	freezeHours := 0
+	if s.settingService != nil {
+		perInviteeCap = s.settingService.GetAffiliateRebatePerInviteeCap(ctx)
+		freezeHours = s.settingService.GetAffiliateRebateFreezeHours(ctx)
+	}
+
+	payouts := make([]AffiliateRebatePayout, 0, len(chain))
+	downstreamCapRate := 0.0
+	downstreamUserID := inviteeUserID
+	for i, recipient := range chain {
+		recipientRate := s.resolveRebateRatePercent(ctx, recipient)
+		deltaRate := roundTo(recipientRate-downstreamCapRate, 8)
+		if deltaRate <= 0 {
+			downstreamCapRate = math.Max(downstreamCapRate, recipientRate)
+			downstreamUserID = recipient.UserID
+			continue
+		}
+		rebate := roundTo(baseRechargeAmount*(deltaRate/100), 8)
+		if rebate <= 0 {
+			downstreamCapRate = math.Max(downstreamCapRate, recipientRate)
+			downstreamUserID = recipient.UserID
+			continue
+		}
+		if perInviteeCap > 0 {
+			existing, err := s.repo.GetAccruedRebateFromInvitee(ctx, recipient.UserID, inviteeUserID)
+			if err != nil {
+				return nil, err
+			}
+			if existing >= perInviteeCap {
+				downstreamCapRate = math.Max(downstreamCapRate, recipientRate)
+				downstreamUserID = recipient.UserID
+				continue
+			}
+			if remaining := perInviteeCap - existing; rebate > remaining {
+				rebate = roundTo(remaining, 8)
+			}
+			if rebate <= 0 {
+				downstreamCapRate = math.Max(downstreamCapRate, recipientRate)
+				downstreamUserID = recipient.UserID
+				continue
+			}
+		}
+		payouts = append(payouts, AffiliateRebatePayout{
+			UserID:                recipient.UserID,
+			SourceUserID:          inviteeUserID,
+			DownstreamUserID:      downstreamUserID,
+			AffiliateLevel:        i + 1,
+			Amount:                rebate,
+			RebateBaseAmount:      baseRechargeAmount,
+			RebateRatePercent:     deltaRate,
+			RecipientRatePercent:  recipientRate,
+			DownstreamRatePercent: downstreamCapRate,
+			SourceOrderID:         sourceOrderID,
+		})
+		result.TotalRebate = roundTo(result.TotalRebate+rebate, 8)
+		downstreamCapRate = math.Max(downstreamCapRate, recipientRate)
+		downstreamUserID = recipient.UserID
+	}
+
+	if len(payouts) == 0 {
+		return result, nil
+	}
+	applied, err := s.repo.AccrueHierarchicalQuota(ctx, payouts, freezeHours)
+	if err != nil {
+		return nil, err
+	}
+	if applied == 0 {
+		return &AffiliatePaymentRebateResult{Payouts: []AffiliateRebatePayout{}}, nil
+	}
+	result.Payouts = payouts
+	return result, nil
+}
+
+func (s *AffiliateService) buildAffiliateChain(ctx context.Context, inviteeUserID int64) ([]*AffiliateSummary, error) {
+	inviteeSummary, err := s.repo.EnsureUserAffiliate(ctx, inviteeUserID)
+	if err != nil {
+		return nil, err
+	}
+	if inviteeSummary.InviterID == nil || *inviteeSummary.InviterID <= 0 {
+		return nil, nil
+	}
+	if s.settingService != nil {
+		if durationDays := s.settingService.GetAffiliateRebateDurationDays(ctx); durationDays > 0 {
+			if time.Now().After(inviteeSummary.CreatedAt.AddDate(0, 0, durationDays)) {
+				return nil, nil
+			}
+		}
+	}
+
+	chain := make([]*AffiliateSummary, 0, affiliateHierarchyMaxDepth)
+	seen := map[int64]bool{inviteeUserID: true}
+	nextID := *inviteeSummary.InviterID
+	for len(chain) < affiliateHierarchyMaxDepth && nextID > 0 {
+		if seen[nextID] {
+			break
+		}
+		seen[nextID] = true
+		summary, err := s.repo.EnsureUserAffiliate(ctx, nextID)
+		if err != nil {
+			return nil, err
+		}
+		chain = append(chain, summary)
+		if summary.InviterID == nil || *summary.InviterID <= 0 {
+			break
+		}
+		nextID = *summary.InviterID
+	}
+	return chain, nil
+}
+
 // resolveRebateRatePercent returns the inviter's exclusive rate when set,
 // otherwise the global setting value (clamped to [Min, Max]).
 func (s *AffiliateService) resolveRebateRatePercent(ctx context.Context, inviter *AffiliateSummary) float64 {
@@ -536,6 +772,9 @@ func (s *AffiliateService) AdminSetUserRebateRate(ctx context.Context, userID in
 	if err := validateExclusiveRate(ratePercent); err != nil {
 		return err
 	}
+	if err := s.validateHierarchyRateCap(ctx, userID, ratePercent); err != nil {
+		return err
+	}
 	return s.repo.SetUserRebateRate(ctx, userID, ratePercent)
 }
 
@@ -555,6 +794,11 @@ func (s *AffiliateService) AdminBatchSetUserRebateRate(ctx context.Context, user
 	}
 	if len(cleaned) == 0 {
 		return nil
+	}
+	for _, uid := range cleaned {
+		if err := s.validateHierarchyRateCap(ctx, uid, ratePercent); err != nil {
+			return err
+		}
 	}
 	return s.repo.BatchSetUserRebateRate(ctx, cleaned, ratePercent)
 }
@@ -606,6 +850,146 @@ func (s *AffiliateService) AdminGetUserOverview(ctx context.Context, userID int6
 		overview.RebateRatePercent = clampAffiliateRebateRate(overview.RebateRatePercent)
 	}
 	return overview, nil
+}
+
+func (s *AffiliateService) AdminListHierarchyRoots(ctx context.Context, filter AffiliateHierarchyRootFilter) ([]AffiliateHierarchyRoot, error) {
+	if s == nil || s.repo == nil {
+		return nil, infraerrors.ServiceUnavailable("SERVICE_UNAVAILABLE", "affiliate service unavailable")
+	}
+	filter.Search = strings.TrimSpace(filter.Search)
+	if filter.Limit <= 0 {
+		filter.Limit = 20
+	}
+	if filter.Limit > affiliateHierarchyPageLimit {
+		filter.Limit = affiliateHierarchyPageLimit
+	}
+	return s.repo.ListAffiliateHierarchyRoots(ctx, filter, s.globalRebateRatePercent(ctx))
+}
+
+func (s *AffiliateService) AdminGetHierarchy(ctx context.Context, filter AffiliateHierarchyFilter) (*AffiliateHierarchyReport, error) {
+	if s == nil || s.repo == nil {
+		return nil, infraerrors.ServiceUnavailable("SERVICE_UNAVAILABLE", "affiliate service unavailable")
+	}
+	if filter.RootUserID <= 0 {
+		return nil, infraerrors.BadRequest("INVALID_USER", "invalid root user")
+	}
+	filter.Search = strings.TrimSpace(filter.Search)
+	if filter.MaxDepth <= 0 || filter.MaxDepth > affiliateHierarchyMaxDepth {
+		filter.MaxDepth = affiliateHierarchyMaxDepth
+	}
+	if filter.Limit <= 0 {
+		filter.Limit = affiliateHierarchyMaxLimit
+	}
+	if filter.Limit > affiliateHierarchyMaxLimit {
+		filter.Limit = affiliateHierarchyMaxLimit
+	}
+	return s.repo.GetAffiliateHierarchy(ctx, filter, s.globalRebateRatePercent(ctx))
+}
+
+func (s *AffiliateService) AdminSetHierarchyUserRebateRate(ctx context.Context, userID int64, ratePercent *float64) error {
+	if s == nil || s.repo == nil {
+		return infraerrors.ServiceUnavailable("SERVICE_UNAVAILABLE", "affiliate service unavailable")
+	}
+	if err := validateExclusiveRate(ratePercent); err != nil {
+		return err
+	}
+	if err := s.validateHierarchyRateCap(ctx, userID, ratePercent); err != nil {
+		return err
+	}
+	return s.repo.SetUserRebateRate(ctx, userID, ratePercent)
+}
+
+func (s *AffiliateService) AdminSetAgentAccess(ctx context.Context, userID int64, enabled bool, notes string, adminID int64) error {
+	if s == nil || s.repo == nil {
+		return infraerrors.ServiceUnavailable("SERVICE_UNAVAILABLE", "affiliate service unavailable")
+	}
+	if userID <= 0 {
+		return infraerrors.BadRequest("INVALID_USER", "invalid user")
+	}
+	if _, err := s.repo.EnsureUserAffiliate(ctx, userID); err != nil {
+		return err
+	}
+	return s.repo.SetAgentAccess(ctx, userID, enabled, strings.TrimSpace(notes), adminID)
+}
+
+func (s *AffiliateService) GetMyAgentAccess(ctx context.Context, userID int64) (*AffiliateAgentAccess, error) {
+	if s == nil || s.repo == nil {
+		return nil, infraerrors.ServiceUnavailable("SERVICE_UNAVAILABLE", "affiliate service unavailable")
+	}
+	if userID <= 0 {
+		return nil, infraerrors.BadRequest("INVALID_USER", "invalid user")
+	}
+	access, err := s.repo.GetAgentAccess(ctx, userID, s.globalRebateRatePercent(ctx))
+	if err != nil {
+		return nil, err
+	}
+	if access == nil {
+		return &AffiliateAgentAccess{UserID: userID, Enabled: false}, nil
+	}
+	return access, nil
+}
+
+func (s *AffiliateService) GetMyAffiliateHierarchy(ctx context.Context, userID int64, filter AffiliateHierarchyFilter) (*AffiliateHierarchyReport, error) {
+	if s == nil || s.repo == nil {
+		return nil, infraerrors.ServiceUnavailable("SERVICE_UNAVAILABLE", "affiliate service unavailable")
+	}
+	if userID <= 0 {
+		return nil, infraerrors.BadRequest("INVALID_USER", "invalid user")
+	}
+	if !s.IsEnabled(ctx) {
+		return nil, ErrAffiliateDisabled
+	}
+	access, err := s.GetMyAgentAccess(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	if access == nil || !access.Enabled {
+		return nil, ErrAgentAccessDenied
+	}
+	filter.RootUserID = userID
+	filter.Search = strings.TrimSpace(filter.Search)
+	if filter.MaxDepth <= 0 || filter.MaxDepth > affiliateHierarchyMaxDepth {
+		filter.MaxDepth = affiliateHierarchyMaxDepth
+	}
+	if filter.Limit <= 0 {
+		filter.Limit = affiliateHierarchyMaxLimit
+	}
+	if filter.Limit > affiliateHierarchyMaxLimit {
+		filter.Limit = affiliateHierarchyMaxLimit
+	}
+	return s.repo.GetAffiliateHierarchy(ctx, filter, s.globalRebateRatePercent(ctx))
+}
+
+func (s *AffiliateService) validateHierarchyRateCap(ctx context.Context, userID int64, ratePercent *float64) error {
+	if userID <= 0 {
+		return infraerrors.BadRequest("INVALID_USER", "invalid user")
+	}
+	summary, err := s.repo.EnsureUserAffiliate(ctx, userID)
+	if err != nil {
+		return err
+	}
+	effectiveRate := s.resolveRebateRatePercent(ctx, summary)
+	if ratePercent != nil {
+		effectiveRate = clampAffiliateRebateRate(*ratePercent)
+	}
+	if summary.InviterID != nil && *summary.InviterID > 0 {
+		parent, err := s.repo.EnsureUserAffiliate(ctx, *summary.InviterID)
+		if err != nil {
+			return err
+		}
+		parentRate := s.resolveRebateRatePercent(ctx, parent)
+		if effectiveRate > parentRate {
+			return ErrAffiliateRateExceedsCap
+		}
+	}
+	maxChildRate, ok, err := s.repo.GetMaxDirectChildRebateRate(ctx, userID, s.globalRebateRatePercent(ctx))
+	if err != nil {
+		return err
+	}
+	if ok && effectiveRate < maxChildRate {
+		return ErrAffiliateRateExceedsCap
+	}
+	return nil
 }
 
 func normalizeAffiliateRecordFilter(filter AffiliateRecordFilter) AffiliateRecordFilter {

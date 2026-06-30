@@ -254,6 +254,18 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/affiliate/hierarchy',
+    name: 'AffiliateHierarchy',
+    component: () => import('@/views/user/AffiliateHierarchyView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: false,
+      title: 'My Agent Team',
+      titleKey: 'nav.myAgentTeam',
+      descriptionKey: 'affiliate.hierarchy.description'
+    }
+  },
+  {
     path: '/available-channels',
     name: 'UserAvailableChannels',
     component: () => import('@/views/user/AvailableChannelsView.vue'),
@@ -600,7 +612,19 @@ const routes: RouteRecordRaw[] = [
   },
   {
     path: '/admin/affiliates',
-    redirect: '/admin/affiliates/invites'
+    redirect: '/admin/affiliates/hierarchy'
+  },
+  {
+    path: '/admin/affiliates/hierarchy',
+    name: 'AdminAffiliateHierarchy',
+    component: () => import('@/views/admin/affiliates/AdminAffiliateHierarchyView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Affiliate Hierarchy',
+      titleKey: 'nav.affiliateHierarchy',
+      descriptionKey: 'admin.affiliates.hierarchyDescription'
+    }
   },
   {
     path: '/admin/affiliates/invites',

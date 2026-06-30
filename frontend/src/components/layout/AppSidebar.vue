@@ -199,6 +199,7 @@ import { useAdminSettingsStore, useAppStore, useAuthStore, useOnboardingStore } 
 import VersionBadge from '@/components/common/VersionBadge.vue'
 import { sanitizeSvg } from '@/utils/sanitize'
 import { FeatureFlags, makeSidebarFlag } from '@/utils/featureFlags'
+import { getMyAgentAccess } from '@/api/affiliateHierarchy'
 
 interface NavItem {
   path: string
@@ -249,6 +250,7 @@ const sidebarCollapsed = computed(() => appStore.sidebarCollapsed)
 const mobileOpen = computed(() => appStore.mobileOpen)
 const isAdmin = computed(() => authStore.isAdmin)
 const isDark = ref(document.documentElement.classList.contains('dark'))
+const agentHierarchyAccessEnabled = ref(false)
 
 // Track which parent nav groups are expanded
 const expandedGroups = ref<Set<string>>(new Set())
@@ -692,6 +694,7 @@ const flagChannelMonitor = makeSidebarFlag(FeatureFlags.channelMonitor)
 const flagPayment = makeSidebarFlag(FeatureFlags.payment)
 const flagAvailableChannels = makeSidebarFlag(FeatureFlags.availableChannels)
 const flagAffiliate = makeSidebarFlag(FeatureFlags.affiliate)
+const flagAgentHierarchy = () => flagAffiliate() !== false && agentHierarchyAccessEnabled.value
 const flagRiskControl = makeSidebarFlag(FeatureFlags.riskControl)
 const flagOpsMonitoring = () => adminSettingsStore.opsMonitoringEnabled
 const flagAdminPayment = () => adminSettingsStore.paymentEnabled
@@ -717,6 +720,7 @@ function buildSelfNavItems(withDashboard: boolean): NavItem[] {
     { path: '/orders', label: t('nav.myOrders'), icon: OrderListIcon, hideInSimpleMode: true, featureFlag: flagPayment },
     { path: '/redeem', label: t('nav.redeem'), icon: GiftIcon, hideInSimpleMode: true },
     { path: '/affiliate', label: t('nav.affiliate'), icon: UsersIcon, hideInSimpleMode: true, featureFlag: flagAffiliate },
+    { path: '/affiliate/hierarchy', label: t('nav.myAgentTeam'), icon: UsersIcon, hideInSimpleMode: true, featureFlag: flagAgentHierarchy },
     { path: '/profile', label: t('nav.profile'), icon: UserIcon },
     ...customMenuItemsForUser.value.map((item): NavItem => ({
       path: `/custom/${item.id}`,
@@ -749,6 +753,23 @@ const customMenuItemsForUser = computed(() => {
     .filter((item) => item.visibility === 'user')
     .sort((a, b) => a.sort_order - b.sort_order)
 })
+
+async function refreshAgentHierarchyAccess() {
+  if (!authStore.isAuthenticated) {
+    agentHierarchyAccessEnabled.value = false
+    return
+  }
+  if (flagAffiliate() === false) {
+    agentHierarchyAccessEnabled.value = false
+    return
+  }
+  try {
+    const access = await getMyAgentAccess()
+    agentHierarchyAccessEnabled.value = access.enabled === true
+  } catch {
+    agentHierarchyAccessEnabled.value = false
+  }
+}
 
 const customMenuItemsForAdmin = computed(() => {
   return adminSettingsStore.customMenuItems
@@ -790,6 +811,7 @@ const adminNavItems = computed((): NavItem[] => {
       expandOnly: true,
       featureFlag: flagAffiliate,
       children: [
+        { path: '/admin/affiliates/hierarchy', label: t('nav.affiliateHierarchy'), icon: UsersIcon },
         { path: '/admin/affiliates/invites', label: t('nav.affiliateInviteRecords'), icon: UsersIcon },
         { path: '/admin/affiliates/rebates', label: t('nav.affiliateRebateRecords'), icon: OrderIcon },
         { path: '/admin/affiliates/transfers', label: t('nav.affiliateTransferRecords'), icon: CreditCardIcon },
@@ -929,10 +951,19 @@ watch(
   { immediate: true }
 )
 
+watch(
+  () => [authStore.isAuthenticated, appStore.cachedPublicSettings?.affiliate_enabled],
+  () => {
+    void refreshAgentHierarchyAccess()
+  },
+  { immediate: true }
+)
+
 onMounted(() => {
   if (isAdmin.value) {
     adminSettingsStore.fetch()
   }
+  void refreshAgentHierarchyAccess()
 })
 </script>
 

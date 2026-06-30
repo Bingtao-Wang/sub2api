@@ -490,7 +490,7 @@ func (s *PaymentService) applyAffiliateRebateForOrder(ctx context.Context, o *db
 	}
 
 	sourceOrderID := o.ID
-	rebateAmount, err := s.affiliateService.AccrueInviteRebateForOrder(txCtx, o.UserID, baseAmount, &sourceOrderID)
+	rebateResult, err := s.affiliateService.AccrueInviteRebatesForPaymentOrder(txCtx, o.UserID, baseAmount, &sourceOrderID)
 	if err != nil {
 		s.writeAuditLog(ctx, o.ID, "AFFILIATE_REBATE_FAILED", "system", map[string]any{
 			"error": err.Error(),
@@ -498,7 +498,7 @@ func (s *PaymentService) applyAffiliateRebateForOrder(ctx context.Context, o *db
 		return fmt.Errorf("accrue affiliate rebate: %w", err)
 	}
 
-	if rebateAmount <= 0 {
+	if rebateResult == nil || rebateResult.TotalRebate <= 0 {
 		if err := s.updateClaimedAffiliateRebateAudit(txCtx, tx.Client(), o.ID, "AFFILIATE_REBATE_SKIPPED", map[string]any{
 			"baseAmount": baseAmount,
 			"reason":     "no inviter bound or rebate amount <= 0",
@@ -519,7 +519,9 @@ func (s *PaymentService) applyAffiliateRebateForOrder(ctx context.Context, o *db
 
 	if err := s.updateClaimedAffiliateRebateAudit(txCtx, tx.Client(), o.ID, "AFFILIATE_REBATE_APPLIED", map[string]any{
 		"baseAmount":   baseAmount,
-		"rebateAmount": rebateAmount,
+		"rebateAmount": rebateResult.TotalRebate,
+		"totalRebate":  rebateResult.TotalRebate,
+		"payouts":      rebateResult.Payouts,
 	}); err != nil {
 		s.writeAuditLog(ctx, o.ID, "AFFILIATE_REBATE_FAILED", "system", map[string]any{
 			"error": err.Error(),
