@@ -24,11 +24,11 @@
       <!-- Center: Friendly Greeting -->
       <div
         v-if="user && friendlyGreeting"
-        class="hidden min-w-0 max-w-[min(42vw,34rem)] items-center justify-center justify-self-center rounded-full border border-amber-200/70 bg-amber-50/80 px-4 py-1.5 text-sm font-medium text-amber-800 shadow-sm dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-200 lg:flex"
+        class="hidden min-w-0 max-w-[min(42vw,34rem)] items-center justify-center justify-self-center px-2 py-1 text-sm font-medium text-gray-700 dark:text-white/85 lg:flex"
         :title="friendlyGreeting"
       >
-        <span class="mr-2 inline-flex shrink-0 animate-bounce" aria-hidden="true">{{ greetingEmoji }}</span>
         <span class="truncate">{{ friendlyGreeting }}</span>
+        <span class="greeting-emoji-sway ml-2 inline-flex shrink-0" aria-hidden="true">{{ greetingEmoji }}</span>
       </div>
 
       <!-- Right: Announcements + Docs + Language + Subscriptions + Balance + User Dropdown -->
@@ -390,5 +390,24 @@ onBeforeUnmount(() => {
 .dropdown-leave-to {
   opacity: 0;
   transform: scale(0.95) translateY(-4px);
+}
+
+.greeting-emoji-sway {
+  animation: greeting-pendulum 5.8s ease-in-out infinite;
+  transform-origin: 50% -80%;
+  will-change: transform;
+}
+
+@keyframes greeting-pendulum {
+  0%,
+  100% {
+    transform: rotate(-7deg);
+  }
+  50% {
+    transform: rotate(7deg);
+  }
+  75% {
+    transform: rotate(2deg);
+  }
 }
 </style>

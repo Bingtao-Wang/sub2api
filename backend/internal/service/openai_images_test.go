@@ -758,6 +758,28 @@ func TestOpenAIGatewayServiceForwardImages_OAuthUpstreamHTTPErrorSurfacesRealErr
 	require.Contains(t, gjson.Get(rec.Body.String(), "error.message").String(), "Invalid value for 'size'")
 }
 
+func TestOpenAIImagesRequestRejectedTriggersFailover(t *testing.T) {
+	svc := &OpenAIGatewayService{}
+	body := []byte(`{"error":{"message":"请求未能完成，请检查模型、参数或客户端配置后重试。","type":"invalid_request_error","code":"request_rejected"}}`)
+
+	require.True(t, svc.shouldFailoverOpenAIImagesUpstreamResponse(
+		http.StatusBadRequest,
+		"请求未能完成，请检查模型、参数或客户端配置后重试。",
+		body,
+	))
+}
+
+func TestOpenAIImagesRequestRejectedContentPolicyDoesNotFailover(t *testing.T) {
+	svc := &OpenAIGatewayService{}
+	body := []byte(`{"error":{"message":"content policy violation","type":"image_generation_user_error","code":"request_rejected"}}`)
+
+	require.False(t, svc.shouldFailoverOpenAIImagesUpstreamResponse(
+		http.StatusBadRequest,
+		"content policy violation",
+		body,
+	))
+}
+
 func TestOpenAIGatewayServiceForwardImages_OAuthNonStreamModerationBlockedReturnsClientError(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	body := []byte(`{"model":"gpt-image-2","prompt":"draw blocked image","response_format":"b64_json"}`)

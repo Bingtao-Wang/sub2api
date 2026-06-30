@@ -1099,7 +1099,7 @@
         }
         const reader = new FileReader();
         reader.onload = () => {
-          files.push({ name: file.name, dataUrl: reader.result });
+          files.push({ name: file.name, dataUrl: reader.result, file });
           loaded++;
           if (loaded === toAdd.length) renderList();
         };
@@ -1185,6 +1185,8 @@
       return '上游账户额度不足，请更换 API 密钥';
     if (msg.includes('model_not_found'))
       return '上游找不到指定模型，请检查模型配置';
+    if (msg.includes('request_rejected'))
+      return '上游拒绝了本次生图请求；系统会尝试切换账号，如果仍失败请换模型或调整参考图';
     if (msg.includes('service temporarily unavailable'))
       return '服务暂时不可用，已自动重试';
     if (msg.includes('http 502') || msg.includes('bad gateway') || msg.includes('connection refused'))
@@ -1529,6 +1531,7 @@
           }, IMAGE_REQUEST_TIMEOUT_MS);
           fetchOptions.signal = controller.signal;
         }
+        if (onProgress) onProgress(label + ' 请求已发送，等待上游返回...');
         console.log('[生图调试] ' + label + ' 请求:', fullURL, 'attempt:', attempt);
         const response = await fetch(fullURL, fetchOptions);
         console.log('[生图调试] ' + label + ' 响应状态:', response.status);
@@ -1605,6 +1608,7 @@
   }
 
   async function generateWithConcurrency(tasks, maxConcurrent, onProgress) {
+    if (!Array.isArray(tasks) || tasks.length === 0) return [];
     const results = new Array(tasks.length);
     let completedCount = 0;
     let nextIndex = 0;
@@ -1618,6 +1622,7 @@
     async function runTask(index) {
       const task = tasks[index];
       try {
+        if (onProgress) onProgress('图片 ' + (index + 1) + '/' + tasks.length + ': 正在发送请求...');
         results[index] = await task();
         completedCount++;
         updateProgress();
@@ -1629,7 +1634,9 @@
     }
 
     const workers = [];
-    const concurrentCount = Math.min(maxConcurrent, tasks.length);
+    const requestedConcurrent = Number.parseInt(maxConcurrent, 10);
+    const safeConcurrent = Number.isFinite(requestedConcurrent) && requestedConcurrent > 0 ? requestedConcurrent : 1;
+    const concurrentCount = Math.max(1, Math.min(safeConcurrent, tasks.length));
 
     for (let i = 0; i < concurrentCount; i++) {
       workers.push((async () => {
@@ -1752,6 +1759,54 @@
     return requestImagesAPI(baseURL, apiKey, imagesBody, onProgress);
   }
 
+  function waitForUIFrame() {
+    return new Promise(resolve => {
+      if (typeof requestAnimationFrame === 'function') {
+        requestAnimationFrame(() => resolve());
+      } else {
+        setTimeout(resolve, 0);
+      }
+    });
+  }
+
+  function safeImageFileName(name, fallback) {
+    const cleaned = cleanText(name || fallback || 'source.png').replace(/[\\/:*?"<>|]+/g, '-');
+    return cleaned || 'source.png';
+  }
+
+  async function dataURLToBlob(dataURL) {
+    if (typeof dataURL !== 'string' || !dataURL.startsWith('data:')) {
+      throw new Error('参考图数据无效');
+    }
+    if (typeof fetch === 'function') {
+      try {
+        const resp = await fetch(dataURL);
+        if (resp.ok) return await resp.blob();
+      } catch (e) {
+        console.warn('[生图调试] dataURL fetch 转 Blob 失败，使用备用转换:', e);
+      }
+    }
+
+    const comma = dataURL.indexOf(',');
+    if (comma < 0) throw new Error('参考图数据格式无效');
+    const header = dataURL.slice(0, comma);
+    const mimeType = dataURL.slice(5, dataURL.indexOf(';')) || 'image/png';
+    const encoded = dataURL.slice(comma + 1);
+    const binary = /;base64/i.test(header) ? atob(encoded) : decodeURIComponent(encoded);
+    const chunkSize = 32 * 1024;
+    const chunks = [];
+    for (let offset = 0; offset < binary.length; offset += chunkSize) {
+      const slice = binary.slice(offset, offset + chunkSize);
+      const bytes = new Uint8Array(slice.length);
+      for (let i = 0; i < slice.length; i++) bytes[i] = slice.charCodeAt(i);
+      chunks.push(bytes);
+      if (offset > 0 && offset % (chunkSize * 16) === 0) {
+        await waitForUIFrame();
+      }
+    }
+    return new Blob(chunks, { type: mimeType });
+  }
+
   async function imageToImage({ prompt, sourceImages, baseURL, apiKey, imageModel, sizeIntent, quality, outputFormat, onProgress }) {
     const tool = {
       type: 'image_generation',
@@ -1770,7 +1825,8 @@
     console.log('[生图调试] 图生图应用SizeIntent后tool:', { size: tool.size });
     
     const content = [{ type: 'input_text', text: enhancedPrompt }];
-    for (const dataURL of sourceImages) {
+    for (const source of sourceImages) {
+      const dataURL = typeof source === 'string' ? source : source?.dataUrl;
       content.push({ type: 'input_image', image_url: dataURL });
     }
     const body = {
@@ -1784,16 +1840,22 @@
       stream: true
     };
     const form = new FormData();
+    if (onProgress) onProgress('正在准备参考图...');
+    await waitForUIFrame();
     for (let i = 0; i < sourceImages.length; i++) {
-      const dataURL = sourceImages[i];
-      const base64Part = dataURL.slice(dataURL.indexOf(",") + 1);
-      const mimeType = dataURL.slice(5, dataURL.indexOf(";")) || "image/png";
-      const ext = mimeType.split("/")[1] || "png";
-      const binary = atob(base64Part);
-      const bytes = new Uint8Array(binary.length);
-      for (let j = 0; j < binary.length; j++) bytes[j] = binary.charCodeAt(j);
-      const blob = new Blob([bytes], { type: mimeType });
-      form.append(i === 0 ? "image" : "image[]", blob, "source-" + (i + 1) + "." + ext);
+      const source = sourceImages[i];
+      const file = source && typeof source === 'object' ? source.file : null;
+      let blob = null;
+      let fileName = source && typeof source === 'object' ? source.name : '';
+      if (typeof Blob !== 'undefined' && file instanceof Blob) {
+        blob = file;
+        fileName = file.name || fileName;
+      } else {
+        const dataURL = typeof source === 'string' ? source : source?.dataUrl;
+        blob = await dataURLToBlob(dataURL);
+      }
+      const fallbackExt = (blob.type || 'image/png').split('/')[1] || 'png';
+      form.append(i === 0 ? "image" : "image[]", blob, safeImageFileName(fileName, "source-" + (i + 1) + "." + fallbackExt));
     }
     form.append("prompt", enhancedPrompt);
     form.append("model", imageModel || "gpt-image-2");
@@ -1947,7 +2009,7 @@
             showToast('请先上传参考图', 'warning');
             return;
           }
-          sourceImages = files.map(f => f.dataUrl);
+          sourceImages = files.map(f => ({ dataUrl: f.dataUrl, file: f.file, name: f.name }));
         }
 
         const canvas = panel.querySelector('.image-canvas');
@@ -1981,6 +2043,8 @@
         const baseURL = (typeof window !== 'undefined' ? window.location.origin : '') || iframeState.srcHost || '';
 
         try {
+          onProgress('正在准备请求...');
+          await waitForUIFrame();
           const tasks = [];
           for (let i = 0; i < count; i++) {
             tasks.push(async () => {

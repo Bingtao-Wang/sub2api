@@ -96,7 +96,51 @@ func (e *OpenAIImagesUpstreamError) clientMessage() string {
 // IsOpenAIImagesRetryableUpstreamError reports whether an Images error is an
 // upstream server failure that may be retried on another account.
 func IsOpenAIImagesRetryableUpstreamError(err *OpenAIImagesUpstreamError) bool {
-	return err != nil && err.StatusCode >= http.StatusInternalServerError
+	return isOpenAIImagesRetryableUpstreamErrorWithBody(err, nil)
+}
+
+func isOpenAIImagesRetryableUpstreamErrorWithBody(err *OpenAIImagesUpstreamError, body []byte) bool {
+	if err == nil {
+		return false
+	}
+	if err.StatusCode >= http.StatusInternalServerError {
+		return true
+	}
+	if len(body) == 0 {
+		body = openAIImagesUpstreamErrorResponseBody(err)
+	}
+	return isOpenAIImagesRetryableRequestRejected(err.StatusCode, err.Message, body)
+}
+
+func isOpenAIImagesRetryableRequestRejected(statusCode int, upstreamMsg string, upstreamBody []byte) bool {
+	if statusCode != http.StatusBadRequest {
+		return false
+	}
+	code := strings.ToLower(strings.TrimSpace(gjson.GetBytes(upstreamBody, "error.code").String()))
+	if code == "" {
+		code = strings.ToLower(strings.TrimSpace(gjson.GetBytes(upstreamBody, "response.error.code").String()))
+	}
+	if code != "request_rejected" {
+		return false
+	}
+
+	errType := strings.ToLower(strings.TrimSpace(gjson.GetBytes(upstreamBody, "error.type").String()))
+	message := strings.ToLower(strings.TrimSpace(upstreamMsg + " " + gjson.GetBytes(upstreamBody, "error.message").String()))
+	if strings.Contains(errType, "content") ||
+		strings.Contains(errType, "policy") ||
+		strings.Contains(message, "content policy") ||
+		strings.Contains(message, "safety") ||
+		strings.Contains(message, "policy") {
+		return false
+	}
+	return true
+}
+
+func (s *OpenAIGatewayService) shouldFailoverOpenAIImagesUpstreamResponse(statusCode int, upstreamMsg string, upstreamBody []byte) bool {
+	if s.shouldFailoverOpenAIUpstreamResponse(statusCode, upstreamMsg, upstreamBody) {
+		return true
+	}
+	return isOpenAIImagesRetryableRequestRejected(statusCode, upstreamMsg, upstreamBody)
 }
 
 func openAIImagesSSEErrorStatus(errType, code string) int {
@@ -1552,7 +1596,7 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 		resp.Body = io.NopCloser(bytes.NewReader(respBody))
 		upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(respBody))
 		upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
-		if s.shouldFailoverOpenAIUpstreamResponse(resp.StatusCode, upstreamMsg, respBody) {
+		if s.shouldFailoverOpenAIImagesUpstreamResponse(resp.StatusCode, upstreamMsg, respBody) {
 			appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 				Platform:           account.Platform,
 				AccountID:          account.ID,
@@ -1660,7 +1704,8 @@ func (s *OpenAIGatewayService) handleOpenAIImagesOAuthResponseError(
 		return err
 	}
 
-	retryable := IsOpenAIImagesRetryableUpstreamError(upstreamErr)
+	responseBody := openAIImagesUpstreamErrorResponseBody(upstreamErr)
+	retryable := isOpenAIImagesRetryableUpstreamErrorWithBody(upstreamErr, responseBody)
 	responseWritten := c != nil && c.Writer != nil && c.Writer.Size() != writerSizeBeforeResponse
 	kind := "http_error"
 	if retryable {
@@ -1693,7 +1738,6 @@ func (s *OpenAIGatewayService) handleOpenAIImagesOAuthResponseError(
 		return err
 	}
 
-	responseBody := openAIImagesUpstreamErrorResponseBody(upstreamErr)
 	s.handleOpenAIAccountUpstreamError(ctx, account, upstreamErr.StatusCode, headers, responseBody, requestedModel)
 	return &UpstreamFailoverError{
 		StatusCode:             upstreamErr.StatusCode,

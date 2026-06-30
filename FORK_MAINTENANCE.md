@@ -200,7 +200,7 @@ git -C /home/aihub/Peter_ws/sub2api log --oneline --left-right origin/custom/gal
 当前运行约定：
 
 - Compose 项目名：`peter-sub2api`
-- 应用镜像：`sub2api-custom:20260630-ui-agent`
+- 应用镜像：`sub2api-custom:20260630-peterai-repeat-fix2`
 - 本机监听：`127.0.0.1:18080`
 - 容器服务端口：`8080`
 - Postgres：Compose 内部服务 `postgres`
@@ -703,6 +703,23 @@ IMAGE_REQUEST_TIMEOUT_MS = 90000
 
 如果 90 秒仍没有任何响应，前端会中断本次请求并重试，避免用户看到 136 秒以上才重试。
 
+2026-06-30 又修复一次“生成成功后再次点生成，页面停在准备中/0.0 秒”的体验问题：
+
+- 前端在构造图生图 `FormData` 前先刷新 UI，并显示“正在准备请求 / 正在准备参考图 / 请求已发送”等进度。
+- 参考图上传后保留原始 `File` 对象；图生图发请求时优先使用 `File/Blob`，避免每次生成前同步把大 base64 字符串重新解码导致界面看起来卡死。
+- 并发生成增加防御：空任务直接返回，并发数异常时至少按 1 个 worker 执行。
+- 后端 Images 专用 failover 规则新增：非内容策略类 `request_rejected` 会触发同组账号切换，不再直接停在第一个生图账号。
+- 内容策略、safety、policy 类拒绝仍作为用户错误返回，不做无效账号切换。
+
+相关代码：
+
+```text
+deploy/static/image-generator/main.js
+backend/internal/service/openai_images.go
+backend/internal/service/openai_images_responses.go
+backend/internal/service/openai_images_test.go
+```
+
 #### 4.3.4 必须验证真实公网文件
 
 如果用户仍反馈旧错误，例如：
@@ -782,7 +799,7 @@ curl -sS 'https://api.peterai.cc.cd/image-generator/main.js?v=price-010-dollar-2
 当前 PeterAI 画图菜单 URL 来自数据库 `settings.custom_menu_items`，不是前端硬编码。当前应指向：
 
 ```text
-https://api.peterai.cc.cd/image-generator/?v=<当前画图页版本>
+https://api.peterai.cc.cd/image-generator/?v=repeat-fix-20260630
 ```
 
 检查命令：
@@ -1070,7 +1087,7 @@ curl -sS https://api.peterai.cc.cd/health
 
 - 问候位于顶栏中间，桌面端显示，窄屏隐藏，避免挤压语言、余额、订阅状态和用户菜单。
 - 使用当前登录用户显示名，优先 `username`，否则使用邮箱前缀。
-- 根据浏览器本地时间切换文案和表情；表情使用轻量 `animate-bounce`。
+- 根据浏览器本地时间切换文案和表情；表情在文案末尾，使用低频钟摆式左右慢摆。
 - 夜深文案固定为：`{name} 夜深了，辛苦了。喝口水，早点休息！加油！`
 - 文案单行截断，完整内容放在 `title`，悬停可看完整句子。
 
@@ -1117,8 +1134,8 @@ backend/internal/service/openai_images_test.go
 当前代码注意点：
 
 - `backend/internal/service/openai_images.go` 的主 Images API 路径已把 `imageCount` 初始化为 `0`，非流式响应只有解析到图片输出时才增加计费张数。
-- `backend/internal/service/openai_images_responses.go` 的 OAuth/Responses 转换路径在无图时会优先返回 `UpstreamFailoverError` 或上游拒绝错误；正常成功返回前仍有 `if imageCount <= 0 { imageCount = parsed.N }` 兜底。按当前上下文，这个兜底通常不会处理“HTTP 200 但无图”的失败场景，但后续改动时应避免让无图响应正常落入成功计费路径。
-- 如果继续维护图片计费，建议增加覆盖 OAuth/Responses 转换路径的无图回归测试，防止将来重构时重新引入失败扣费。
+- `backend/internal/service/openai_images_responses.go` 的 OAuth/Responses 转换路径在无图时会优先返回 `UpstreamFailoverError` 或上游拒绝错误；无最终图片不能进入成功计费路径。
+- 非内容策略类 `request_rejected` 对生图路径按可切换账号错误处理，避免第一个账号拒绝后直接失败。
 
 已处理历史失败扣费：
 
@@ -1351,6 +1368,30 @@ sg docker -c 'docker compose -f /home/aihub/Peter_ws/sub2api/deploy/docker-compo
 ## 七、更新记录
 
 ### 2026-06-30
+
+- PeterAI 二次生图与顶栏样式修复并上线：
+  - 已构建并部署当前生产镜像：`sub2api-custom:20260630-peterai-repeat-fix2`。
+  - 当前运行镜像 ID：`sha256:e2cfb8bc49882b7229a75522689cbdec6c8b065660d0a138362b11aee44b1fc1`。
+  - 仅重建应用容器 `sub2api`，Postgres / Redis 未重建。
+  - PeterAI 静态页版本已更新为：`repeat-fix-20260630`。
+  - 已同步数据库 `settings.custom_menu_items` 中的 iframe URL：`image-generator/?v=repeat-fix-20260630`。
+  - 修复图生图重复生成时停在“准备中 / 已用时 0.0 秒”的问题：参考图发请求时优先用原始 `File/Blob`，并在准备请求、准备参考图、请求已发送阶段主动更新进度。
+  - 生图后端新增 Images 专用 `request_rejected` failover：非内容策略类拒绝会切换同组下一个账号；内容策略/安全策略拒绝仍直接返回用户错误。
+  - 顶栏问候取消金色背景，恢复常规柔和文字色；表情放在文案末尾，并改为 5.8 秒低频钟摆式慢摆。
+  - 代码链接：
+    - [deploy/static/image-generator/index.html](deploy/static/image-generator/index.html)
+    - [deploy/static/image-generator/main.js](deploy/static/image-generator/main.js)
+    - [backend/internal/service/openai_images.go](backend/internal/service/openai_images.go)
+    - [backend/internal/service/openai_images_responses.go](backend/internal/service/openai_images_responses.go)
+    - [backend/internal/service/openai_images_test.go](backend/internal/service/openai_images_test.go)
+    - [frontend/src/components/layout/AppHeader.vue](frontend/src/components/layout/AppHeader.vue)
+  - 验证：
+    - `node -c deploy/static/image-generator/main.js` 通过。
+    - `docker run --rm -v /home/aihub/Peter_ws/sub2api/backend:/app -w /app golang:1.26.4-alpine go test ./internal/service -run 'TestOpenAIImagesRequestRejected|TestOpenAIGatewayServiceForwardImages_OAuthUpstreamHTTPErrorSurfacesRealError'` 通过。
+    - `docker run --rm -v /home/aihub/Peter_ws/sub2api/backend:/app -w /app golang:1.26.4-alpine go test ./internal/handler -tags unit -run TestOpenAIGatewayHandlerImages_ServerErrorFailsOverAndReturnsClearErrorWhenExhausted` 通过。
+    - `npm run typecheck` 通过。
+    - `npm run lint -- --max-warnings=0 src/components/layout/AppHeader.vue` 通过。
+    - `deploy/verify-production.sh` 通过，`single_dollar_forEach = 0`，仓库静态文件 hash 与容器一致。
 
 - UI 增强并上线：
   - 已构建并部署当前生产镜像：`sub2api-custom:20260630-ui-agent`。
