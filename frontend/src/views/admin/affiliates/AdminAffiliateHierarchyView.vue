@@ -94,9 +94,27 @@
       </template>
 
       <template #table>
-        <DataTable :columns="columns" :data="nodes" :loading="loading" row-key="user_id">
+        <DataTable
+          :columns="columns"
+          :data="visibleNodes"
+          :loading="loading"
+          row-key="user_id"
+          server-side-sort
+          @sort="handleSort"
+        >
           <template #cell-user="{ row }">
             <div class="flex items-center gap-2" :style="{ paddingLeft: `${Math.min(row.depth, 12) * 18}px` }">
+              <button
+                v-if="hasNodeDescendants(row)"
+                type="button"
+                class="flex h-6 w-6 shrink-0 items-center justify-center rounded text-gray-500 hover:bg-gray-100 hover:text-gray-900 dark:text-dark-400 dark:hover:bg-dark-800 dark:hover:text-white"
+                :title="isNodeCollapsed(row.user_id) ? t('common.expand') : t('common.collapse')"
+                :aria-label="isNodeCollapsed(row.user_id) ? t('common.expand') : t('common.collapse')"
+                @click.stop="toggleNodeCollapse(row)"
+              >
+                <Icon :name="isNodeCollapsed(row.user_id) ? 'chevronRight' : 'chevronDown'" size="xs" />
+              </button>
+              <span v-else class="h-6 w-6 shrink-0"></span>
               <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-gray-100 text-xs font-semibold text-gray-600 dark:bg-dark-800 dark:text-dark-300">
                 {{ row.depth }}
               </span>
@@ -299,6 +317,11 @@ import type { Column } from '@/components/common/types'
 import { useAppStore } from '@/stores/app'
 import { extractI18nErrorMessage } from '@/utils/apiError'
 import {
+  getAffiliateHierarchyDescendantCountMap,
+  getVisibleAffiliateHierarchyNodes,
+  type AffiliateHierarchySortOrder,
+} from '@/utils/affiliateHierarchyTree'
+import {
   affiliateHierarchyAPI,
   type AffiliateHierarchyNode,
   type AffiliateHierarchyRoot,
@@ -311,6 +334,11 @@ const appStore = useAppStore()
 const roots = ref<AffiliateHierarchyRoot[]>([])
 const selectedRoot = ref<AffiliateHierarchyRoot | null>(null)
 const nodes = ref<AffiliateHierarchyNode[]>([])
+const collapsedNodeIds = ref<Set<number>>(new Set())
+const sortState = reactive({
+  key: '',
+  order: 'asc' as AffiliateHierarchySortOrder,
+})
 const loading = ref(false)
 const rootsLoading = ref(false)
 const rootPickerOpen = ref(false)
@@ -351,18 +379,21 @@ let hierarchySearchTimer: ReturnType<typeof setTimeout> | null = null
 let agentSearchTimer: ReturnType<typeof setTimeout> | null = null
 
 const columns = computed<Column[]>(() => [
-  { key: 'user', label: t('admin.affiliates.hierarchy.user') },
-  { key: 'depth', label: t('admin.affiliates.hierarchy.depth') },
-  { key: 'parent', label: t('admin.affiliates.hierarchy.parent') },
-  { key: 'aff_code', label: t('admin.affiliates.hierarchy.affCode') },
-  { key: 'effective_rebate_rate_percent', label: t('admin.affiliates.hierarchy.effectiveRate') },
-  { key: 'direct_invite_count', label: t('admin.affiliates.hierarchy.directInvites') },
-  { key: 'team_size', label: t('admin.affiliates.hierarchy.teamSize') },
-  { key: 'self_recharge_amount', label: t('admin.affiliates.hierarchy.selfRecharge') },
-  { key: 'team_recharge_amount', label: t('admin.affiliates.hierarchy.teamRecharge') },
-  { key: 'rebate_amount', label: t('admin.affiliates.hierarchy.rebateAmount') },
-  { key: 'actions', label: t('admin.affiliates.hierarchy.actions') },
+  { key: 'user', label: t('admin.affiliates.hierarchy.user'), sortable: true },
+  { key: 'depth', label: t('admin.affiliates.hierarchy.depth'), sortable: true },
+  { key: 'parent', label: t('admin.affiliates.hierarchy.parent'), sortable: true },
+  { key: 'aff_code', label: t('admin.affiliates.hierarchy.affCode'), sortable: true },
+  { key: 'effective_rebate_rate_percent', label: t('admin.affiliates.hierarchy.effectiveRate'), sortable: true },
+  { key: 'direct_invite_count', label: t('admin.affiliates.hierarchy.directInvites'), sortable: true },
+  { key: 'team_size', label: t('admin.affiliates.hierarchy.teamSize'), sortable: true },
+  { key: 'self_recharge_amount', label: t('admin.affiliates.hierarchy.selfRecharge'), sortable: true },
+  { key: 'team_recharge_amount', label: t('admin.affiliates.hierarchy.teamRecharge'), sortable: true },
+  { key: 'rebate_amount', label: t('admin.affiliates.hierarchy.rebateAmount'), sortable: true },
+  { key: 'actions', label: t('admin.affiliates.hierarchy.actions'), sortable: true },
 ])
+
+const descendantCountByUserId = computed(() => getAffiliateHierarchyDescendantCountMap(nodes.value))
+const visibleNodes = computed(() => getVisibleAffiliateHierarchyNodes(nodes.value, collapsedNodeIds.value, sortState))
 
 const canSubmitRate = computed(() => {
   if (clearRate.value) return true
@@ -397,6 +428,35 @@ function resetSummary(next?: AffiliateHierarchySummary) {
     rebate_amount: 0,
   }
   Object.assign(summary, value)
+}
+
+function pruneCollapsedNodeIds() {
+  const currentIds = new Set(nodes.value.map((node) => node.user_id))
+  collapsedNodeIds.value = new Set([...collapsedNodeIds.value].filter((userId) => currentIds.has(userId)))
+}
+
+function hasNodeDescendants(node: AffiliateHierarchyNode): boolean {
+  return (descendantCountByUserId.value.get(node.user_id) ?? 0) > 0
+}
+
+function isNodeCollapsed(userId: number): boolean {
+  return collapsedNodeIds.value.has(userId)
+}
+
+function toggleNodeCollapse(node: AffiliateHierarchyNode) {
+  if (!hasNodeDescendants(node)) return
+  const next = new Set(collapsedNodeIds.value)
+  if (next.has(node.user_id)) {
+    next.delete(node.user_id)
+  } else {
+    next.add(node.user_id)
+  }
+  collapsedNodeIds.value = next
+}
+
+function handleSort(key: string, order: AffiliateHierarchySortOrder) {
+  sortState.key = key
+  sortState.order = order
 }
 
 async function loadRoots() {
@@ -446,6 +506,7 @@ async function loadHierarchy() {
       timezone: userTimezone(),
     })
     nodes.value = report.nodes || []
+    pruneCollapsedNodeIds()
     resetSummary(report.summary)
   } catch (err) {
     appStore.showError(extractI18nErrorMessage(err, t, 'admin.affiliates.hierarchy.errors', t('admin.affiliates.hierarchy.errors.loadFailed')))
@@ -458,6 +519,7 @@ function selectRoot(root: AffiliateHierarchyRoot, shouldLoad = true) {
   selectedRoot.value = root
   rootSearch.value = `${root.email || root.username || '#' + root.user_id}`
   rootPickerOpen.value = false
+  collapsedNodeIds.value = new Set()
   if (shouldLoad) {
     void loadHierarchy()
   }

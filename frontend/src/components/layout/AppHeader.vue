@@ -1,8 +1,8 @@
 <template>
   <header class="glass sticky top-0 z-30 border-b border-gray-200/50 dark:border-dark-700/50">
-    <div class="flex h-16 items-center justify-between px-4 md:px-6">
+    <div class="grid h-16 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-3 px-4 md:px-6">
       <!-- Left: Mobile Menu Toggle + Page Title -->
-      <div class="flex items-center gap-4">
+      <div class="flex min-w-0 items-center gap-4 justify-self-start">
         <button
           @click="toggleMobileSidebar"
           class="btn-ghost btn-icon lg:hidden"
@@ -11,18 +11,28 @@
           <Icon name="menu" size="md" />
         </button>
 
-        <div class="hidden lg:block">
-          <h1 class="text-lg font-semibold text-gray-900 dark:text-white">
+        <div class="hidden min-w-0 lg:block">
+          <h1 class="truncate text-lg font-semibold text-gray-900 dark:text-white">
             {{ pageTitle }}
           </h1>
-          <p v-if="pageDescription" class="text-xs text-gray-500 dark:text-dark-400">
+          <p v-if="pageDescription" class="truncate text-xs text-gray-500 dark:text-dark-400">
             {{ pageDescription }}
           </p>
         </div>
       </div>
 
+      <!-- Center: Friendly Greeting -->
+      <div
+        v-if="user && friendlyGreeting"
+        class="hidden min-w-0 max-w-[min(42vw,34rem)] items-center justify-center justify-self-center rounded-full border border-amber-200/70 bg-amber-50/80 px-4 py-1.5 text-sm font-medium text-amber-800 shadow-sm dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-200 lg:flex"
+        :title="friendlyGreeting"
+      >
+        <span class="mr-2 inline-flex shrink-0 animate-bounce" aria-hidden="true">{{ greetingEmoji }}</span>
+        <span class="truncate">{{ friendlyGreeting }}</span>
+      </div>
+
       <!-- Right: Announcements + Docs + Language + Subscriptions + Balance + User Dropdown -->
-      <div class="flex items-center gap-3">
+      <div class="flex min-w-0 items-center gap-3 justify-self-end">
         <!-- Announcement Bell -->
         <AnnouncementBell v-if="user" />
 
@@ -234,6 +244,8 @@ const onboardingStore = useOnboardingStore()
 const user = computed(() => authStore.user)
 const dropdownOpen = ref(false)
 const dropdownRef = ref<HTMLElement | null>(null)
+const now = ref(new Date())
+let clockTimer: ReturnType<typeof setInterval> | null = null
 const contactInfo = computed(() => appStore.contactInfo)
 const docUrl = computed(() => appStore.docUrl)
 const avatarUrl = computed(() => user.value?.avatar_url?.trim() || '')
@@ -260,6 +272,38 @@ const userInitials = computed(() => {
 const displayName = computed(() => {
   if (!user.value) return ''
   return user.value.username || user.value.email?.split('@')[0] || ''
+})
+
+const greetingVariant = computed(() => {
+  const hour = now.value.getHours()
+  if (hour < 5) {
+    return { key: 'common.headerGreeting.lateNight', emoji: '🌙' }
+  }
+  if (hour < 8) {
+    return { key: 'common.headerGreeting.earlyMorning', emoji: '🌤️' }
+  }
+  if (hour < 12) {
+    return { key: 'common.headerGreeting.morning', emoji: '☀️' }
+  }
+  if (hour < 14) {
+    return { key: 'common.headerGreeting.noon', emoji: '🍵' }
+  }
+  if (hour < 18) {
+    return { key: 'common.headerGreeting.afternoon', emoji: '✨' }
+  }
+  if (hour < 22) {
+    return { key: 'common.headerGreeting.evening', emoji: '🌆' }
+  }
+  return { key: 'common.headerGreeting.lateNight', emoji: '🌙' }
+})
+
+const greetingEmoji = computed(() => greetingVariant.value.emoji)
+
+const friendlyGreeting = computed(() => {
+  const name = displayName.value.trim()
+  if (!name) return ''
+
+  return t(greetingVariant.value.key, { name })
 })
 
 const pageTitle = computed(() => {
@@ -322,10 +366,17 @@ function handleClickOutside(event: MouseEvent) {
 
 onMounted(() => {
   document.addEventListener('click', handleClickOutside)
+  clockTimer = setInterval(() => {
+    now.value = new Date()
+  }, 60 * 1000)
 })
 
 onBeforeUnmount(() => {
   document.removeEventListener('click', handleClickOutside)
+  if (clockTimer) {
+    clearInterval(clockTimer)
+    clockTimer = null
+  }
 })
 </script>
 

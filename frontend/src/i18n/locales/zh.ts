@@ -328,6 +328,14 @@ export default {
     today: '今天',
     tomorrow: '明天',
     unknown: '未知',
+    headerGreeting: {
+      earlyMorning: '{name} 早呀，起得很早，先喝点水，慢慢进入状态。',
+      morning: '{name} 早上好，今天也稳稳推进。',
+      noon: '{name} 中午好，记得吃饭，也给自己留一点空隙。',
+      afternoon: '{name} 下午好，保持节奏，别忘了活动一下肩颈。',
+      evening: '{name} 晚上好，辛苦一天了，处理完重要的就放松一下。',
+      lateNight: '{name} 夜深了，辛苦了。喝口水，早点休息！加油！'
+    },
     minutes: '分钟',
     time: {
       never: '从未',

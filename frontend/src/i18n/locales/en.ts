@@ -328,6 +328,14 @@ export default {
     today: 'Today',
     tomorrow: 'Tomorrow',
     unknown: 'Unknown',
+    headerGreeting: {
+      earlyMorning: 'Good early morning, {name}. Start gently and take a sip of water.',
+      morning: 'Good morning, {name}. Keep a steady pace today.',
+      noon: 'Hi {name}, remember to eat and leave yourself a little breathing room.',
+      afternoon: 'Good afternoon, {name}. Keep the rhythm, and stretch your shoulders when you can.',
+      evening: 'Good evening, {name}. You have done enough for the day; unwind when the key work is done.',
+      lateNight: 'It is late, {name}. You have made solid progress. Drink some water, stretch a little, and rest when you can; tomorrow is still there.'
+    },
     minutes: 'min',
     time: {
       never: 'Never',

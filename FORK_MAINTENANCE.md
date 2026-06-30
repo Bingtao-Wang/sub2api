@@ -27,6 +27,7 @@
   - [4.4 自定义菜单 URL](#44-自定义菜单-url)
   - [4.5 支付配置](#45-支付配置)
   - [4.6 多级代理层级与代理账户授权](#46-多级代理层级与代理账户授权)
+  - [4.7 顶栏用户关怀问候](#47-顶栏用户关怀问候)
 - [五、计费与数据修复](#五计费与数据修复)
   - [5.1 图片生成价格](#51-图片生成价格)
   - [5.2 失败请求不扣费](#52-失败请求不扣费)
@@ -199,7 +200,7 @@ git -C /home/aihub/Peter_ws/sub2api log --oneline --left-right origin/custom/gal
 当前运行约定：
 
 - Compose 项目名：`peter-sub2api`
-- 应用镜像：`sub2api-custom:20260630-v0140`
+- 应用镜像：`sub2api-custom:20260630-ui-agent`
 - 本机监听：`127.0.0.1:18080`
 - 容器服务端口：`8080`
 - Postgres：Compose 内部服务 `postgres`
@@ -877,6 +878,9 @@ https://www.ezfpy.cn/
 - 被授权用户可在用户侧看到“我的代理团队”，只能查看自己作为根节点的下级树。
 - 用户侧接口强制使用当前登录用户 ID 作为根节点，忽略任何前端伪造的 `root_user_id`。
 - 普通代理第一版只读，不能编辑返利比例，不能选择根节点，不能查看上级、兄弟代理或其他团队。
+- 2026-06-30 UI 增强：管理员和用户侧代理层级表均支持节点折叠/展开，以及按用户、层级、上级、邀请码、有效比例、直属人数、团队人数、本人充值、团队充值、已获返利排序。
+- 排序保持树结构语义：只重排同一父级下的兄弟节点，不把父子关系打散。
+- 用户侧“我的代理团队”菜单固定放在“邀请返利”下面，并通过会话缓存代理访问权限，避免进入页面时菜单隐藏/显示造成闪跳。
 
 返利结算规则：
 
@@ -987,26 +991,25 @@ GET /api/v1/user/aff/hierarchy
 
 管理端页面：
 
-```text
-frontend/src/views/admin/affiliates/AdminAffiliateHierarchyView.vue
-frontend/src/api/admin/affiliateHierarchy.ts
-```
+- [frontend/src/views/admin/affiliates/AdminAffiliateHierarchyView.vue](frontend/src/views/admin/affiliates/AdminAffiliateHierarchyView.vue)
+- [frontend/src/api/admin/affiliateHierarchy.ts](frontend/src/api/admin/affiliateHierarchy.ts)
 
 用户侧页面：
 
-```text
-frontend/src/views/user/AffiliateHierarchyView.vue
-frontend/src/api/affiliateHierarchy.ts
-```
+- [frontend/src/views/user/AffiliateHierarchyView.vue](frontend/src/views/user/AffiliateHierarchyView.vue)
+- [frontend/src/api/affiliateHierarchy.ts](frontend/src/api/affiliateHierarchy.ts)
 
 路由和菜单：
 
-```text
-frontend/src/router/index.ts
-frontend/src/components/layout/AppSidebar.vue
-frontend/src/i18n/locales/zh.ts
-frontend/src/i18n/locales/en.ts
-```
+- [frontend/src/router/index.ts](frontend/src/router/index.ts)
+- [frontend/src/components/layout/AppSidebar.vue](frontend/src/components/layout/AppSidebar.vue)
+- [frontend/src/i18n/locales/zh.ts](frontend/src/i18n/locales/zh.ts)
+- [frontend/src/i18n/locales/en.ts](frontend/src/i18n/locales/en.ts)
+
+树表折叠与排序公共逻辑：
+
+- [frontend/src/utils/affiliateHierarchyTree.ts](frontend/src/utils/affiliateHierarchyTree.ts)
+- [frontend/src/utils/__tests__/affiliateHierarchyTree.spec.ts](frontend/src/utils/__tests__/affiliateHierarchyTree.spec.ts)
 
 页面入口：
 
@@ -1030,7 +1033,8 @@ docker run --rm -v "$PWD/backend:/app" -w /app golang:1.26.4 go test -tags unit 
 ```bash
 cd /home/aihub/Peter_ws/sub2api/frontend
 npm run typecheck -- --pretty false
-npm run lint:check -- src/views/admin/affiliates/AdminAffiliateHierarchyView.vue src/views/user/AffiliateHierarchyView.vue src/components/layout/AppSidebar.vue src/router/index.ts src/api/admin/affiliateHierarchy.ts src/api/affiliateHierarchy.ts
+npx eslint src/views/admin/affiliates/AdminAffiliateHierarchyView.vue src/views/user/AffiliateHierarchyView.vue src/components/layout/AppSidebar.vue src/components/layout/AppHeader.vue src/utils/affiliateHierarchyTree.ts src/i18n/locales/zh.ts src/i18n/locales/en.ts
+npm run test:run -- src/utils/__tests__/affiliateHierarchyTree.spec.ts
 npm run build
 ```
 
@@ -1048,6 +1052,27 @@ curl -sS https://api.peterai.cc.cd/health
 - 可搜索用户、设置比例、开启或取消代理层级访问。
 - 被授权用户登录后显示“我的代理团队”。
 - 未授权用户直接访问 `/affiliate/hierarchy` 无数据权限。
+- 点击代理层级表有下级的用户节点，可以折叠/展开其全部下级。
+- 点击表头排序时，父子关系保持不变，仅同级节点重排。
+- 多次进入“我的代理团队”时，侧边栏菜单不应出现隐藏后再显示的闪跳。
+
+### 4.7 顶栏用户关怀问候
+
+2026-06-30 新增顶栏中间问候。目标是让用户进入后台后能看到带用户名的轻量关怀提示，尤其夜深时提醒休息。
+
+实现位置：
+
+- [frontend/src/components/layout/AppHeader.vue](frontend/src/components/layout/AppHeader.vue)
+- [frontend/src/i18n/locales/zh.ts](frontend/src/i18n/locales/zh.ts)
+- [frontend/src/i18n/locales/en.ts](frontend/src/i18n/locales/en.ts)
+
+交互规则：
+
+- 问候位于顶栏中间，桌面端显示，窄屏隐藏，避免挤压语言、余额、订阅状态和用户菜单。
+- 使用当前登录用户显示名，优先 `username`，否则使用邮箱前缀。
+- 根据浏览器本地时间切换文案和表情；表情使用轻量 `animate-bounce`。
+- 夜深文案固定为：`{name} 夜深了，辛苦了。喝口水，早点休息！加油！`
+- 文案单行截断，完整内容放在 `title`，悬停可看完整句子。
 
 ## 五、计费与数据修复
 
@@ -1222,6 +1247,8 @@ sg docker -c 'docker compose -f /home/aihub/Peter_ws/sub2api/deploy/docker-compo
 - 成功图片按 `$0.1` 计费
 - 失败图片不扣图片费用
 - 支付入口和回调页面正常
+- 代理层级表折叠/排序正常，用户侧“我的代理团队”菜单不闪跳
+- 顶栏中间问候显示当前用户名，夜深时显示休息提醒文案
 
 ### 6.3 回滚流程
 
@@ -1325,10 +1352,35 @@ sg docker -c 'docker compose -f /home/aihub/Peter_ws/sub2api/deploy/docker-compo
 
 ### 2026-06-30
 
+- UI 增强并上线：
+  - 已构建并部署当前生产镜像：`sub2api-custom:20260630-ui-agent`。
+  - 当前运行镜像 ID：`sha256:fef0ae6ecdb44a847547abc0a8ad476c5c6dc93493efe37805f2d574882c361e`。
+  - 仅重建应用容器 `sub2api`，Postgres / Redis 未重建。
+  - 生产验证 `deploy/verify-production.sh` 通过，本机和公网 `/health` 均返回 `{"status":"ok"}`。
+  - 新增代理层级树表折叠/展开与表头排序，树结构排序只重排兄弟节点，不打散父子关系。
+  - 修复用户侧“我的代理团队”侧边栏菜单闪跳：代理访问权限按用户写入 `sessionStorage`，并去掉重复权限请求。
+  - “我的代理团队”侧边栏图标改为层级节点图标，和普通“邀请返利”区分。
+  - 顶栏中间新增用户关怀问候，按本地时间切换文案和跳动表情；夜深文案为 `{name} 夜深了，辛苦了。喝口水，早点休息！加油！`。
+  - 代码链接：
+    - [frontend/src/components/layout/AppHeader.vue](frontend/src/components/layout/AppHeader.vue)
+    - [frontend/src/components/layout/AppSidebar.vue](frontend/src/components/layout/AppSidebar.vue)
+    - [frontend/src/views/admin/affiliates/AdminAffiliateHierarchyView.vue](frontend/src/views/admin/affiliates/AdminAffiliateHierarchyView.vue)
+    - [frontend/src/views/user/AffiliateHierarchyView.vue](frontend/src/views/user/AffiliateHierarchyView.vue)
+    - [frontend/src/utils/affiliateHierarchyTree.ts](frontend/src/utils/affiliateHierarchyTree.ts)
+    - [frontend/src/utils/__tests__/affiliateHierarchyTree.spec.ts](frontend/src/utils/__tests__/affiliateHierarchyTree.spec.ts)
+    - [frontend/src/i18n/locales/zh.ts](frontend/src/i18n/locales/zh.ts)
+    - [frontend/src/i18n/locales/en.ts](frontend/src/i18n/locales/en.ts)
+  - 验证命令：
+    - `npm run typecheck` 通过。
+    - `npm run test:run -- src/utils/__tests__/affiliateHierarchyTree.spec.ts` 通过。
+    - 目标文件 `eslint` 通过。
+    - `docker build -t sub2api-custom:20260630-ui-agent .` 通过。
+    - `git diff --check` 通过。
+
 - 官方上游升级并上线：
   - 已先提交并推送代理层级功能到 GitHub fork：`e24f68d1 feat: add affiliate agent hierarchy access`。
-  - 已从 `upstream/main` 合并官方最新版本：`v0.1.140`，上游 HEAD `89b2d63e`。
-  - 合并后当前 `custom/gallery` HEAD：`57a1735d`。
+  - 已从 `upstream/main` 合并官方最新版本：`v0.1.141`，上游 HEAD `dc1bc154`。
+  - 合并后并修复 Wire provider 后的 `custom/gallery` HEAD：`fee80d5d`。
   - 已推送到 `origin/custom/gallery`，当前本地与远端无 ahead/behind。
 - 新增并上线多级代理层级与代理账户授权：
   - 管理员页面：`/admin/affiliates/hierarchy`。
@@ -1348,15 +1400,15 @@ sg docker -c 'docker compose -f /home/aihub/Peter_ws/sub2api/deploy/docker-compo
   - 前端：`npm run build` 通过，仅有既有 Vite chunk / dynamic import 警告。
   - `git diff --check` 通过。
 - 发布：
-  - 已构建镜像：`sub2api-custom:20260630-v0140`。
-  - `deploy/.env` 已指向 `SUB2API_IMAGE=sub2api-custom:20260630-v0140`。
+  - 早前已构建镜像：`sub2api-custom:20260630-v0140`。
+  - 当前 `deploy/.env` 已指向 `SUB2API_IMAGE=sub2api-custom:20260630-ui-agent`。
   - 仅重建应用容器 `sub2api`，Postgres / Redis 未重建。
   - 当前容器状态：`peter-sub2api-sub2api-1` healthy，端口 `127.0.0.1:18080->8080`。
 - 生产验证：
   - 本机健康检查：`http://127.0.0.1:18080/health -> {"status":"ok"}`。
   - 公网健康检查：`https://api.peterai.cc.cd/health -> {"status":"ok"}`。
   - `deploy/verify-production.sh` 通过。
-  - 当前画图页版本：`image-timeout-motion-20260627`。
+  - 当前画图页版本：`image-billing-models-20260630`。
   - 公网 `main.js` 语法检查通过，`single_dollar_forEach = 0`。
   - 图片价格仍为每张 `0.1`：所有用户组 `1K / 2K / 4K` 最小值和最大值均为 `0.10000000`。
   - 仓库 `deploy/static/image-generator/` 与容器 `/app/data/public/image-generator/` hash 一致。

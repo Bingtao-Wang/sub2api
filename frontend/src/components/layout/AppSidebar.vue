@@ -250,7 +250,10 @@ const sidebarCollapsed = computed(() => appStore.sidebarCollapsed)
 const mobileOpen = computed(() => appStore.mobileOpen)
 const isAdmin = computed(() => authStore.isAdmin)
 const isDark = ref(document.documentElement.classList.contains('dark'))
-const agentHierarchyAccessEnabled = ref(false)
+const AGENT_HIERARCHY_ACCESS_CACHE_PREFIX = 'agent_hierarchy_access:'
+const agentHierarchyAccessEnabled = ref<boolean | null>(readCachedAgentHierarchyAccess())
+let agentHierarchyAccessRequest: Promise<void> | null = null
+let agentHierarchyAccessRequestUserId: number | null = null
 
 // Track which parent nav groups are expanded
 const expandedGroups = ref<Set<string>>(new Set())
@@ -377,6 +380,21 @@ const UsersIcon = {
           'stroke-linecap': 'round',
           'stroke-linejoin': 'round',
           d: 'M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z'
+        })
+      ]
+    )
+}
+
+const HierarchyIcon = {
+  render: () =>
+    h(
+      'svg',
+      { fill: 'none', viewBox: '0 0 24 24', stroke: 'currentColor', 'stroke-width': '1.5' },
+      [
+        h('path', {
+          'stroke-linecap': 'round',
+          'stroke-linejoin': 'round',
+          d: 'M10.5 3.75h3v3h-3v-3zM5.25 15.75h3v3h-3v-3zM10.5 15.75h3v3h-3v-3zM15.75 15.75h3v3h-3v-3zM12 6.75v3.75m0 0H7.5a2.25 2.25 0 00-2.25 2.25v3m6.75-5.25h4.5a2.25 2.25 0 012.25 2.25v3M12 10.5v5.25'
         })
       ]
     )
@@ -694,7 +712,7 @@ const flagChannelMonitor = makeSidebarFlag(FeatureFlags.channelMonitor)
 const flagPayment = makeSidebarFlag(FeatureFlags.payment)
 const flagAvailableChannels = makeSidebarFlag(FeatureFlags.availableChannels)
 const flagAffiliate = makeSidebarFlag(FeatureFlags.affiliate)
-const flagAgentHierarchy = () => flagAffiliate() !== false && agentHierarchyAccessEnabled.value
+const flagAgentHierarchy = () => flagAffiliate() !== false && agentHierarchyAccessEnabled.value === true
 const flagRiskControl = makeSidebarFlag(FeatureFlags.riskControl)
 const flagOpsMonitoring = () => adminSettingsStore.opsMonitoringEnabled
 const flagAdminPayment = () => adminSettingsStore.paymentEnabled
@@ -720,7 +738,7 @@ function buildSelfNavItems(withDashboard: boolean): NavItem[] {
     { path: '/orders', label: t('nav.myOrders'), icon: OrderListIcon, hideInSimpleMode: true, featureFlag: flagPayment },
     { path: '/redeem', label: t('nav.redeem'), icon: GiftIcon, hideInSimpleMode: true },
     { path: '/affiliate', label: t('nav.affiliate'), icon: UsersIcon, hideInSimpleMode: true, featureFlag: flagAffiliate },
-    { path: '/affiliate/hierarchy', label: t('nav.myAgentTeam'), icon: UsersIcon, hideInSimpleMode: true, featureFlag: flagAgentHierarchy },
+    { path: '/affiliate/hierarchy', label: t('nav.myAgentTeam'), icon: HierarchyIcon, hideInSimpleMode: true, featureFlag: flagAgentHierarchy },
     { path: '/profile', label: t('nav.profile'), icon: UserIcon },
     ...customMenuItemsForUser.value.map((item): NavItem => ({
       path: `/custom/${item.id}`,
@@ -754,21 +772,69 @@ const customMenuItemsForUser = computed(() => {
     .sort((a, b) => a.sort_order - b.sort_order)
 })
 
+function getAgentHierarchyAccessCacheKey(): string | null {
+  if (!authStore.isAuthenticated || !authStore.user?.id) return null
+  return `${AGENT_HIERARCHY_ACCESS_CACHE_PREFIX}${authStore.user.id}`
+}
+
+function readCachedAgentHierarchyAccess(): boolean | null {
+  if (typeof sessionStorage === 'undefined') return null
+  const key = getAgentHierarchyAccessCacheKey()
+  if (!key) return null
+  const cached = sessionStorage.getItem(key)
+  if (cached === 'true') return true
+  if (cached === 'false') return false
+  return null
+}
+
+function writeCachedAgentHierarchyAccess(enabled: boolean) {
+  if (typeof sessionStorage === 'undefined') return
+  const key = getAgentHierarchyAccessCacheKey()
+  if (!key) return
+  sessionStorage.setItem(key, enabled ? 'true' : 'false')
+}
+
+function setAgentHierarchyAccess(enabled: boolean) {
+  agentHierarchyAccessEnabled.value = enabled
+  writeCachedAgentHierarchyAccess(enabled)
+}
+
 async function refreshAgentHierarchyAccess() {
   if (!authStore.isAuthenticated) {
     agentHierarchyAccessEnabled.value = false
     return
   }
   if (flagAffiliate() === false) {
-    agentHierarchyAccessEnabled.value = false
+    setAgentHierarchyAccess(false)
     return
   }
-  try {
-    const access = await getMyAgentAccess()
-    agentHierarchyAccessEnabled.value = access.enabled === true
-  } catch {
-    agentHierarchyAccessEnabled.value = false
+  const cached = readCachedAgentHierarchyAccess()
+  if (cached !== null) {
+    agentHierarchyAccessEnabled.value = cached
   }
+  const currentUserId = authStore.user?.id ?? null
+  if (agentHierarchyAccessRequest && agentHierarchyAccessRequestUserId === currentUserId) {
+    await agentHierarchyAccessRequest
+    return
+  }
+  const requestUserId = currentUserId
+  agentHierarchyAccessRequestUserId = requestUserId
+  agentHierarchyAccessRequest = (async () => {
+    try {
+      const access = await getMyAgentAccess()
+      if (authStore.user?.id !== requestUserId) return
+      setAgentHierarchyAccess(access.enabled === true)
+    } catch {
+      if (cached === true) return
+      agentHierarchyAccessEnabled.value = false
+    } finally {
+      if (agentHierarchyAccessRequestUserId === requestUserId) {
+        agentHierarchyAccessRequest = null
+        agentHierarchyAccessRequestUserId = null
+      }
+    }
+  })()
+  await agentHierarchyAccessRequest
 }
 
 const customMenuItemsForAdmin = computed(() => {
@@ -952,7 +1018,7 @@ watch(
 )
 
 watch(
-  () => [authStore.isAuthenticated, appStore.cachedPublicSettings?.affiliate_enabled],
+  () => [authStore.isAuthenticated, authStore.user?.id, appStore.cachedPublicSettings?.affiliate_enabled],
   () => {
     void refreshAgentHierarchyAccess()
   },
@@ -963,7 +1029,6 @@ onMounted(() => {
   if (isAdmin.value) {
     adminSettingsStore.fetch()
   }
-  void refreshAgentHierarchyAccess()
 })
 </script>
 
