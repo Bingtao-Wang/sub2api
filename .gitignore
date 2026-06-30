@@ -138,3 +138,7 @@ docs/*
 frontend/coverage/
 aicodex
 output/
+
+# Local runtime backups. Keep only the placeholder so the directory exists.
+/backups/*
+!/backups/.gitignore

@@ -15,6 +15,7 @@
   - [2.3 Compose 隔离约定](#23-compose-隔离约定)
   - [2.4 数据恢复与备份](#24-数据恢复与备份)
   - [2.5 运行时配置真相源](#25-运行时配置真相源)
+  - [2.6 本地定时备份](#26-本地定时备份)
 - [三、公网访问与域名](#三公网访问与域名)
   - [3.1 本机访问入口](#31-本机访问入口)
   - [3.2 Cloudflare Tunnel](#32-cloudflare-tunnel)
@@ -261,6 +262,21 @@ sg docker -c 'docker compose exec postgres sh -lc '\''PGPASSWORD="$POSTGRES_PASS
 sg docker -c 'docker run --rm -v peter-sub2api_sub2api_data:/data -v /home/aihub/Peter_ws/migration:/backup alpine sh -lc '\''cd /data && tar -xzf /backup/sub2api_appdata_20260622_163819.tar.gz'\'''
 ```
 
+当前后台内置 S3/R2 备份状态：
+
+```text
+backup_schedule={"enabled":true,"cron_expr":"0 2 * * *","retain_days":14,"retain_count":10}
+```
+
+但尚未配置 `backup_s3_config`，应用日志显示：
+
+```text
+BACKUP_S3_NOT_CONFIGURED
+backup S3 storage is not configured
+```
+
+因此内置 S3/R2 定时备份虽然会在每天 02:00 触发，但当前不会生成远端备份。已额外配置本地定时备份，见 [2.6](#26-本地定时备份)。
+
 ### 2.5 运行时配置真相源
 
 生产运行时以 `deploy/.env` + `deploy/docker-compose.yml` + Docker volume + 数据库设置共同决定，不能只看源码默认值。
@@ -293,6 +309,66 @@ grep -E '^(COMPOSE_PROJECT_NAME|SUB2API_IMAGE|BIND_HOST|SERVER_PORT|GATEWAY_IMAG
 sg docker -c 'docker inspect peter-sub2api-sub2api-1 --format "{{.Config.Image}}"'
 sg docker -c 'docker compose -f /home/aihub/Peter_ws/sub2api/deploy/docker-compose.yml --env-file /home/aihub/Peter_ws/sub2api/deploy/.env ps'
 ```
+
+### 2.6 本地定时备份
+
+已配置本地备份目录：
+
+```text
+/home/aihub/Peter_ws/sub2api/backups
+```
+
+已配置备份脚本：
+
+```text
+/home/aihub/Peter_ws/sub2api/deploy/local-backup.sh
+```
+
+备份内容：
+
+- Postgres 数据库：`pg_dump -Fc` 自定义格式 dump。
+- 应用数据 volume：`peter-sub2api_sub2api_data`，包含 `/app/data` 下的静态覆盖文件、日志、配置和其他运行数据。
+- 每次备份生成一个时间戳目录，包含 dump、appdata tar.gz、manifest 和 sha256 校验文件。
+
+当前 crontab：
+
+```cron
+0 2 * * * /home/aihub/Peter_ws/sub2api/deploy/local-backup.sh >> /home/aihub/Peter_ws/sub2api/backups/cron.log 2>&1 # sub2api-local-backup
+```
+
+保留策略：
+
+```text
+RETAIN_DAYS=14
+RETAIN_COUNT=10
+```
+
+手动执行：
+
+```bash
+/home/aihub/Peter_ws/sub2api/deploy/local-backup.sh
+```
+
+检查最近备份：
+
+```bash
+find /home/aihub/Peter_ws/sub2api/backups -maxdepth 2 -type f | sort
+cd /home/aihub/Peter_ws/sub2api/backups/<timestamp>
+sha256sum -c sha256sums.txt
+sg docker -c 'docker run --rm -v "$PWD:/backup" postgres:18-alpine pg_restore -l /backup/sub2api_pg_<timestamp>.dump | head'
+```
+
+2026-06-30 手动验证成功：
+
+```text
+/home/aihub/Peter_ws/sub2api/backups/20260630_132221
+Postgres dump: 72M
+App data tar.gz: 24M
+sha256sum -c: OK
+pg_restore -l: 可读取
+```
+
+注意：本地备份只防误操作和短期回滚，不防服务器磁盘损坏或整机丢失。生产环境仍建议补齐 R2/S3 远端备份。
 
 ## 三、公网访问与域名
 
