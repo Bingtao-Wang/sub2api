@@ -2,13 +2,13 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-BACKUP_DIR="${BACKUP_DIR:-$ROOT_DIR/backups}"
+BACKUP_DIR="${BACKUP_DIR:-/home/aihub/Peter_ws/sub2api-backups}"
 COMPOSE_FILE="${COMPOSE_FILE:-$ROOT_DIR/deploy/docker-compose.yml}"
 ENV_FILE="${ENV_FILE:-$ROOT_DIR/deploy/.env}"
 PROJECT_NAME="${PROJECT_NAME:-peter-sub2api}"
 APP_VOLUME="${APP_VOLUME:-${PROJECT_NAME}_sub2api_data}"
-RETAIN_DAYS="${RETAIN_DAYS:-14}"
-RETAIN_COUNT="${RETAIN_COUNT:-10}"
+RETAIN_DAYS="${RETAIN_DAYS:-0}"
+RETAIN_COUNT="${RETAIN_COUNT:-7}"
 
 PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
@@ -70,7 +70,9 @@ log "backup files"
 du -h "$db_file" "$app_file" "$manifest_file" "$sha_file" | tee -a "$manifest_file"
 
 log "cleaning old backups: retain_days=$RETAIN_DAYS retain_count=$RETAIN_COUNT"
-find "$BACKUP_DIR" -mindepth 1 -maxdepth 1 -type d -name '20????????_??????' -mtime "+$RETAIN_DAYS" -print -exec rm -rf {} +
+if [[ "$RETAIN_DAYS" =~ ^[0-9]+$ ]] && (( RETAIN_DAYS > 0 )); then
+  find "$BACKUP_DIR" -mindepth 1 -maxdepth 1 -type d -name '20????????_??????' -mtime "+$RETAIN_DAYS" -print -exec rm -rf {} +
+fi
 
 if [[ "$RETAIN_COUNT" =~ ^[0-9]+$ ]] && (( RETAIN_COUNT > 0 )); then
   mapfile -t old_dirs < <(find "$BACKUP_DIR" -mindepth 1 -maxdepth 1 -type d -name '20????????_??????' -printf '%f\n' | sort -r | tail -n +"$((RETAIN_COUNT + 1))")

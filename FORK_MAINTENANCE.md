@@ -315,7 +315,7 @@ sg docker -c 'docker compose -f /home/aihub/Peter_ws/sub2api/deploy/docker-compo
 已配置本地备份目录：
 
 ```text
-/home/aihub/Peter_ws/sub2api/backups
+/home/aihub/Peter_ws/sub2api-backups
 ```
 
 已配置备份脚本：
@@ -333,15 +333,17 @@ sg docker -c 'docker compose -f /home/aihub/Peter_ws/sub2api/deploy/docker-compo
 当前 crontab：
 
 ```cron
-0 2 * * * /home/aihub/Peter_ws/sub2api/deploy/local-backup.sh >> /home/aihub/Peter_ws/sub2api/backups/cron.log 2>&1 # sub2api-local-backup
+0 2 * * * /home/aihub/Peter_ws/sub2api/deploy/local-backup.sh >> /home/aihub/Peter_ws/sub2api-backups/cron.log 2>&1 # sub2api-local-backup
 ```
 
 保留策略：
 
 ```text
-RETAIN_DAYS=14
-RETAIN_COUNT=10
+RETAIN_DAYS=0
+RETAIN_COUNT=7
 ```
+
+`RETAIN_DAYS=0` 表示不按天数删除，只按数量保留最近 7 份备份。
 
 手动执行：
 
@@ -352,8 +354,8 @@ RETAIN_COUNT=10
 检查最近备份：
 
 ```bash
-find /home/aihub/Peter_ws/sub2api/backups -maxdepth 2 -type f | sort
-cd /home/aihub/Peter_ws/sub2api/backups/<timestamp>
+find /home/aihub/Peter_ws/sub2api-backups -maxdepth 2 -type f | sort
+cd /home/aihub/Peter_ws/sub2api-backups/<timestamp>
 sha256sum -c sha256sums.txt
 sg docker -c 'docker run --rm -v "$PWD:/backup" postgres:18-alpine pg_restore -l /backup/sub2api_pg_<timestamp>.dump | head'
 ```
@@ -361,7 +363,7 @@ sg docker -c 'docker run --rm -v "$PWD:/backup" postgres:18-alpine pg_restore -l
 2026-06-30 手动验证成功：
 
 ```text
-/home/aihub/Peter_ws/sub2api/backups/20260630_132221
+/home/aihub/Peter_ws/sub2api-backups/20260630_132528
 Postgres dump: 72M
 App data tar.gz: 24M
 sha256sum -c: OK
