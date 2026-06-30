@@ -592,9 +592,7 @@
       { value: '', label: '正在加载你的 API 密钥...' }
     ],
       'model': [
-        { value: 'gpt-image-2', label: 'gpt-image-2' },
-        { value: 'gpt-image-1.5', label: 'gpt-image-1.5' },
-        { value: 'gpt-image-1', label: 'gpt-image-1' }
+        { value: '', label: '正在加载生图模型...' }
       ],
       'quality': [
         { value: 'auto', label: '自动' },
@@ -662,6 +660,26 @@
       return text.includes('API') || text.includes('密钥');
     }
 
+    function isModelField(field) {
+      const label = field?.querySelector('.input-label');
+      const text = label?.textContent?.trim() || '';
+      return text.includes('模型');
+    }
+
+    function setGenerationAvailability(message) {
+      const blocked = !!message;
+      $$('.image-submit').forEach(btn => {
+        btn.dataset.optionsBlocked = blocked ? '1' : '';
+        if (blocked) {
+          btn.disabled = true;
+          btn.title = message;
+        } else {
+          btn.disabled = false;
+          btn.removeAttribute('title');
+        }
+      });
+    }
+
     function setTriggerSelection(trigger, option) {
       if (!trigger || !option) return;
       trigger.dataset.selectValue = option.value || '';
@@ -683,12 +701,52 @@
       });
     }
 
+    function clearModelSelectionLabel(text) {
+      $$(".select-trigger").forEach(trigger => {
+        const field = trigger.closest('.image-field');
+        if (!isModelField(field)) return;
+        trigger.dataset.selectValue = '';
+        trigger.dataset.selectLabel = text || '';
+        trigger.dataset.selectId = '';
+        const valueNode = trigger.querySelector('.select-value');
+        if (valueNode) valueNode.textContent = text;
+      });
+    }
+
     function syncApiKeySelection(option) {
       $$(".select-trigger").forEach(trigger => {
         const field = trigger.closest('.image-field');
         if (!isApiKeyField(field)) return;
         setTriggerSelection(trigger, option);
       });
+    }
+
+    function syncModelSelection(option) {
+      $$(".select-trigger").forEach(trigger => {
+        const field = trigger.closest('.image-field');
+        if (!isModelField(field)) return;
+        setTriggerSelection(trigger, option);
+      });
+    }
+
+    function modelOptionsFromApiKey(option) {
+      const models = Array.isArray(option?.models) ? option.models : [];
+      return models
+        .map(model => cleanText(model))
+        .filter(Boolean)
+        .map(model => ({ value: model, label: model }));
+    }
+
+    function applyModelsForApiKey(option) {
+      const models = modelOptionsFromApiKey(option);
+      SELECT_OPTIONS['model'] = models.length ? models : [{ value: '', label: '暂无可用生图模型' }];
+      if (models.length) {
+        syncModelSelection(models[0]);
+        setGenerationAvailability('');
+      } else {
+        clearModelSelectionLabel('暂无可用生图模型');
+        setGenerationAvailability('暂无可用生图模型');
+      }
     }
 
     function pickPreferredApiKey(options) {
@@ -774,6 +832,7 @@
             ev.stopPropagation();
             if (optionsKey === 'api-key') {
               syncApiKeySelection(opt);
+              applyModelsForApiKey(opt);
               saveLastApiKeyPreference(opt);
             } else {
               setTriggerSelection(trigger, opt);
@@ -827,24 +886,28 @@
     async function fetchAndPopulateApiKeys() {
       if (!iframeState.token) {
         setApiKeySelectLabel('请先登录 sub2api 后再进入此页面');
+        clearModelSelectionLabel('请先登录后加载模型');
+        setGenerationAvailability('请先登录 sub2api 后再进入此页面');
         return;
       }
 
       try {
-        let resp = await callSub2API('/api/v1/keys?page=1&page_size=200', { timeoutMs: 5000 }).catch((e) => {
-          console.warn('[生图调试] 同源获取API密钥请求失败:', e);
+        let resp = await callSub2API('/api/v1/user/image-generation/options', { timeoutMs: 5000 }).catch((e) => {
+          console.warn('[生图调试] 同源获取生图选项请求失败:', e);
           return null;
         });
         if (!resp && iframeState.srcHost && iframeState.srcHost !== window.location.origin) {
-          resp = await callSub2API('/api/v1/keys?page=1&page_size=200', { origin: iframeState.srcHost, timeoutMs: 5000 }).catch((e) => {
-            console.warn('[生图调试] src_host获取API密钥请求失败:', e);
+          resp = await callSub2API('/api/v1/user/image-generation/options', { origin: iframeState.srcHost, timeoutMs: 5000 }).catch((e) => {
+            console.warn('[生图调试] src_host获取生图选项请求失败:', e);
             return null;
           });
         }
         const payload = resp?.data || resp || {};
-        const items = Array.isArray(payload) ? payload : (payload.items || payload.data?.items || []);
+        const items = Array.isArray(payload.keys) ? payload.keys : (Array.isArray(payload) ? payload : []);
         if (!Array.isArray(items) || items.length === 0) {
-          setApiKeySelectLabel('暂无 API 密钥，请先在 sub2api 创建');
+          setApiKeySelectLabel('暂无可用生图 API 密钥');
+          clearModelSelectionLabel('暂无可用生图模型');
+          setGenerationAvailability('暂无可用生图模型');
           return;
         }
 
@@ -852,25 +915,38 @@
           .map(item => ({
             id: item.id == null ? '' : cleanText(item.id),
             value: cleanText(item.key),
-            label: cleanText(item.name || item.key || '未命名密钥')
+            label: cleanText(item.name || item.key || '未命名密钥'),
+            groupId: item.group_id == null ? '' : cleanText(item.group_id),
+            groupName: cleanText(item.group_name),
+            models: Array.isArray(item.models) ? item.models.map(model => cleanText(model)).filter(Boolean) : []
           }))
-          .filter(item => item.value);
-        console.log('[生图调试] 获取到API密钥数量:', apiKeys.length, apiKeys.map(k => ({ label: k.label, valueLen: k.value.length })));
+          .filter(item => item.value && item.models.length > 0);
+        console.log('[生图调试] 获取到可用生图API密钥数量:', apiKeys.length, apiKeys.map(k => ({ label: k.label, group: k.groupName, models: k.models })));
 
         if (apiKeys.length > 0) {
           SELECT_OPTIONS['api-key'] = apiKeys;
+        } else {
+          setApiKeySelectLabel('暂无可用生图 API 密钥');
+          clearModelSelectionLabel('暂无可用生图模型');
+          setGenerationAvailability('暂无可用生图模型');
+          return;
         }
 
         const preferred = pickPreferredApiKey(SELECT_OPTIONS['api-key']) || SELECT_OPTIONS['api-key'][0];
         if (preferred) {
           syncApiKeySelection(preferred);
+          applyModelsForApiKey(preferred);
           console.log('[生图调试] 已选择API密钥:', { label: preferred.label, restored: preferred !== SELECT_OPTIONS['api-key'][0] });
         } else {
           setApiKeySelectLabel('请选择 API 密钥');
+          clearModelSelectionLabel('请选择 API 密钥后加载模型');
+          setGenerationAvailability('请选择 API 密钥');
         }
       } catch (e) {
-        console.warn('[生图调试] 获取API密钥失败:', e);
-        setApiKeySelectLabel('无法获取 API 密钥，请刷新或重新登录');
+        console.warn('[生图调试] 获取生图选项失败:', e);
+        setApiKeySelectLabel('无法获取生图 API 密钥');
+        clearModelSelectionLabel('无法获取生图模型');
+        setGenerationAvailability('无法获取生图模型，请刷新或重新登录');
       }
     }
 
@@ -1496,7 +1572,6 @@
     console.log('[生图调试] 回退到 Images API:', fullURL, 'API Key:', maskedKey);
     if (onProgress) onProgress('正在通过备用接口生成...');
     return requestImagesWithRetry('Images API', () => {
-      const streamBody = { ...requestBody, stream: true, partial_images: 1 };
       return {
         fullURL,
         fetchOptions: {
@@ -1504,9 +1579,9 @@
           headers: {
             'Authorization': 'Bearer ' + apiKey,
             'Content-Type': 'application/json',
-            'Accept': 'text/event-stream, application/json'
+            'Accept': 'application/json'
           },
-          body: JSON.stringify(streamBody)
+          body: JSON.stringify(requestBody)
         }
       };
     }, onProgress);
@@ -1516,15 +1591,13 @@
     const fullURL = baseURL + '/v1/images/edits';
     console.log('[生图调试] 回退到 Images Edit API:', fullURL);
     if (onProgress) onProgress('正在通过备用接口生成...');
-    if (!formData.has('stream')) formData.append('stream', 'true');
-    if (!formData.has('partial_images')) formData.append('partial_images', '1');
     return requestImagesWithRetry('Images Edit API', () => ({
       fullURL,
       fetchOptions: {
         method: 'POST',
         headers: {
           'Authorization': 'Bearer ' + apiKey,
-          'Accept': 'text/event-stream, application/json'
+          'Accept': 'application/json'
         },
         body: formData
       }
@@ -1628,6 +1701,12 @@
     const range = panel.querySelector('.image-range');
     const count = range ? parseInt(range.value) || 1 : 1;
     return { prompt, model, quality, outputFormat, sizeIntent, ratio, resolutionTier, count };
+  }
+
+  function hasUsableImageGenerationOptions() {
+    const keys = SELECT_OPTIONS['api-key'] || [];
+    const models = SELECT_OPTIONS['model'] || [];
+    return keys.some(item => item && item.value) && models.some(item => item && item.value);
   }
 
   async function textToImage({ prompt, baseURL, apiKey, imageModel, sizeIntent, quality, outputFormat, onProgress }) {
@@ -1835,10 +1914,18 @@
     })();
     $$('.image-submit').forEach(btn => {
       btn.addEventListener('click', async () => {
+        if (btn.dataset.optionsBlocked === '1' || !hasUsableImageGenerationOptions()) {
+          showToast(btn.title || '暂无可用生图模型', 'warning');
+          return;
+        }
         const panel = btn.closest('.mode-panel');
         if (!panel) return;
 
         const { prompt, model, quality, outputFormat, sizeIntent, ratio, resolutionTier, count } = getPanelParams(panel);
+        if (!model) {
+          showToast('请选择生图模型', 'warning');
+          return;
+        }
         if (!prompt) {
           showToast('请输入提示词', 'warning');
           const ta = panel.querySelector('textarea.input, textarea.prompt-textarea');

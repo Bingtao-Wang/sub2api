@@ -58,6 +58,40 @@ func TestOpenAIGatewayServiceParseOpenAIImagesRequest_JSON(t *testing.T) {
 	require.False(t, parsed.Multipart)
 }
 
+func TestIsOpenAIImageModelAlias(t *testing.T) {
+	allowed := []string{
+		"gpt-image-2",
+		"chatgpt-image-1",
+		"qwen-image-2.0",
+		"wan2.7-image",
+		"wan2.7-image-pro",
+		"flux-2",
+		"seedream-4.5",
+		"nano-banana-pro",
+		"grok-imagine-image",
+		"gemini-2.5-flash-image",
+		"dall-e-3",
+	}
+	for _, model := range allowed {
+		require.True(t, IsOpenAIImageModelAlias(model), model)
+		require.NoError(t, validateOpenAIImagesModel(model), model)
+	}
+
+	rejected := []string{
+		"",
+		"gpt-5.5",
+		"gpt-5.4",
+		"kimi-k2.6",
+		"codex-auto-review",
+		"claude-4.5-sonnet",
+		"deepseek-v3.2",
+	}
+	for _, model := range rejected {
+		require.False(t, IsOpenAIImageModelAlias(model), model)
+		require.Error(t, validateOpenAIImagesModel(model), model)
+	}
+}
+
 func TestOpenAIGatewayServiceParseOpenAIImagesRequest_MultipartEdit(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -1068,14 +1102,12 @@ func TestOpenAIGatewayServiceForwardImages_APIKeyNonStreamNoImageDoesNotBill(t *
 	}
 
 	result, err := svc.ForwardImages(context.Background(), c, account, body, parsed, "")
-	require.NoError(t, err)
-	require.NotNil(t, result)
-	require.False(t, result.Stream)
-	require.Equal(t, 0, result.ImageCount)
-	require.Equal(t, 10, result.Usage.InputTokens)
-	require.Equal(t, 18, result.Usage.OutputTokens)
-	require.Equal(t, "req_img_empty", result.RequestID)
-	require.Equal(t, http.StatusOK, rec.Code)
+	require.Nil(t, result)
+	var failoverErr *UpstreamFailoverError
+	require.ErrorAs(t, err, &failoverErr)
+	require.Equal(t, http.StatusBadGateway, failoverErr.StatusCode)
+	require.True(t, failoverErr.RetryableOnSameAccount)
+	require.False(t, c.Writer.Written())
 }
 
 func TestOpenAIGatewayServiceForwardImages_APIKeyStreamRawJSONEventStreamFallbackBillsImage(t *testing.T) {

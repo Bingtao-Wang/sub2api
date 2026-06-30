@@ -1627,7 +1627,7 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 		}
 	}
 	if imageCount <= 0 {
-		imageCount = parsed.N
+		return nil, fmt.Errorf("upstream did not return image output")
 	}
 	return &OpenAIForwardResult{
 		RequestID:        resp.Header.Get("x-request-id"),

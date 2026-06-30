@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"html"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -201,6 +202,7 @@ type APIKeyService struct {
 	groupRepo             GroupRepository
 	userSubRepo           UserSubscriptionRepository
 	userGroupRateRepo     UserGroupRateRepository
+	accountRepo           AccountRepository
 	cache                 APIKeyCache
 	rateLimitCacheInvalid RateLimitCacheInvalidator // optional: invalidate Redis rate limit cache
 	cfg                   *config.Config
@@ -240,12 +242,30 @@ func (s *APIKeyService) SetRateLimitCacheInvalidator(inv RateLimitCacheInvalidat
 	s.rateLimitCacheInvalid = inv
 }
 
+// SetAccountRepository enables optional user endpoints that need account-level scheduling metadata.
+func (s *APIKeyService) SetAccountRepository(repo AccountRepository) {
+	s.accountRepo = repo
+}
+
 func (s *APIKeyService) compileAPIKeyIPRules(apiKey *APIKey) {
 	if apiKey == nil {
 		return
 	}
 	apiKey.CompiledIPWhitelist = ip.CompileIPRules(apiKey.IPWhitelist)
 	apiKey.CompiledIPBlacklist = ip.CompileIPRules(apiKey.IPBlacklist)
+}
+
+type ImageGenerationAPIKeyOption struct {
+	ID        int64    `json:"id"`
+	Name      string   `json:"name"`
+	Key       string   `json:"key"`
+	GroupID   int64    `json:"group_id"`
+	GroupName string   `json:"group_name"`
+	Models    []string `json:"models"`
+}
+
+type ImageGenerationOptions struct {
+	Keys []ImageGenerationAPIKeyOption `json:"keys"`
 }
 
 // GenerateKey 生成随机API Key
@@ -437,6 +457,106 @@ func (s *APIKeyService) List(ctx context.Context, userID int64, params paginatio
 		return nil, nil, fmt.Errorf("list api keys: %w", err)
 	}
 	return keys, pagination, nil
+}
+
+func (s *APIKeyService) GetImageGenerationOptions(ctx context.Context, userID int64) (*ImageGenerationOptions, error) {
+	if s.accountRepo == nil {
+		return nil, fmt.Errorf("account repository is not configured")
+	}
+	keys, _, err := s.apiKeyRepo.ListByUserID(ctx, userID, pagination.PaginationParams{
+		Page:      1,
+		PageSize:  500,
+		SortBy:    "created_at",
+		SortOrder: pagination.SortOrderDesc,
+	}, APIKeyListFilters{Status: StatusActive})
+	if err != nil {
+		return nil, fmt.Errorf("list api keys: %w", err)
+	}
+
+	modelsByGroup := make(map[int64][]string)
+	out := make([]ImageGenerationAPIKeyOption, 0, len(keys))
+	for i := range keys {
+		key := &keys[i]
+		if !key.IsActive() || key.IsExpired() || key.IsQuotaExhausted() || key.GroupID == nil || key.Group == nil {
+			continue
+		}
+		group := key.Group
+		if group.Platform != PlatformOpenAI || !group.IsActive() || !GroupAllowsImageGeneration(group) {
+			continue
+		}
+		models, ok := modelsByGroup[group.ID]
+		if !ok {
+			models, err = s.imageGenerationModelsForGroup(ctx, group.ID)
+			if err != nil {
+				return nil, err
+			}
+			modelsByGroup[group.ID] = models
+		}
+		if len(models) == 0 {
+			continue
+		}
+		out = append(out, ImageGenerationAPIKeyOption{
+			ID:        key.ID,
+			Name:      key.Name,
+			Key:       key.Key,
+			GroupID:   group.ID,
+			GroupName: group.Name,
+			Models:    models,
+		})
+	}
+	return &ImageGenerationOptions{Keys: out}, nil
+}
+
+func (s *APIKeyService) imageGenerationModelsForGroup(ctx context.Context, groupID int64) ([]string, error) {
+	accounts, err := s.accountRepo.ListByGroup(ctx, groupID)
+	if err != nil {
+		return nil, fmt.Errorf("list group accounts: %w", err)
+	}
+	seen := make(map[string]struct{})
+	for i := range accounts {
+		account := &accounts[i]
+		if account.Platform != PlatformOpenAI || !account.IsSchedulable() {
+			continue
+		}
+		mapping := account.GetModelMapping()
+		for requested := range mapping {
+			model := strings.TrimSpace(requested)
+			if model == "" || strings.Contains(model, "*") || !IsOpenAIImageModelAlias(model) {
+				continue
+			}
+			seen[model] = struct{}{}
+		}
+	}
+	models := make([]string, 0, len(seen))
+	for model := range seen {
+		models = append(models, model)
+	}
+	sortImageGenerationModels(models)
+	return models, nil
+}
+
+func sortImageGenerationModels(models []string) {
+	if len(models) < 2 {
+		return
+	}
+	preferred := map[string]int{
+		"gpt-image-2":   0,
+		"gpt-image-1.5": 1,
+		"gpt-image-1":   2,
+	}
+	sort.Slice(models, func(i, j int) bool {
+		li := strings.ToLower(models[i])
+		lj := strings.ToLower(models[j])
+		pi, iPreferred := preferred[li]
+		pj, jPreferred := preferred[lj]
+		if iPreferred || jPreferred {
+			if iPreferred && jPreferred {
+				return pi < pj
+			}
+			return iPreferred
+		}
+		return li < lj
+	})
 }
 
 func (s *APIKeyService) VerifyOwnership(ctx context.Context, userID int64, apiKeyIDs []int64) ([]int64, error) {

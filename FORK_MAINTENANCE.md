@@ -26,6 +26,7 @@
   - [4.3 PeterAI 画图页面](#43-peterai-画图页面)
   - [4.4 自定义菜单 URL](#44-自定义菜单-url)
   - [4.5 支付配置](#45-支付配置)
+  - [4.6 多级代理层级与代理账户授权](#46-多级代理层级与代理账户授权)
 - [五、计费与数据修复](#五计费与数据修复)
   - [5.1 图片生成价格](#51-图片生成价格)
   - [5.2 失败请求不扣费](#52-失败请求不扣费)
@@ -49,21 +50,19 @@
 ```text
 upstream/main
     |
-origin/main
-    |
 custom/gallery
 ```
 
 各分支职责：
 
-- `main`：干净同步 `upstream/main`，不要放自定义功能。
-- `gpt55-defaults`：最新 `main` + GPT-5.5 默认模型改动。
-- `custom/gallery`：最新 `main` + GPT-5.5 默认模型改动 + 图片画廊 + PeterAI 画图相关定制。
+- `main`：可作为干净同步 `upstream/main` 的参考分支，不放自定义功能；当前生产发布不依赖本地 `main`。
+- `gpt55-defaults`：历史 GPT-5.5 默认模型分支；当前不作为生产发布来源。
+- `custom/gallery`：当前生产分支，直接合并 `upstream/main`，包含 GPT-5.5 默认模型、图片画廊、PeterAI 画图、部署脚本、本地备份、多级代理层级等定制。
 
 当前远端：
 
 - `upstream`：`https://github.com/Wei-Shaw/sub2api.git`
-- `origin`：`https://github.com/Bingtao-Wang/sub2api.git`
+- `origin`：`git@github.com:Bingtao-Wang/sub2api.git`
 
 当前生产分支：
 
@@ -79,24 +78,24 @@ cd /home/aihub/Peter_ws/sub2api
 git fetch upstream --prune
 git fetch origin --prune
 
+git checkout custom/gallery
+git merge upstream/main
+
+# 解决冲突并完成验证后
+git push origin custom/gallery
+```
+
+生产分支优先使用 merge，不使用 rebase。原因是 `custom/gallery` 已经承载生产部署历史和自定义迁移，merge 能保留上游同步点和线上发布记录，避免频繁改写远端历史。
+
+如果需要维护干净的 `main` 镜像分支，可单独执行：
+
+```bash
 git checkout main
 git reset --hard upstream/main
 git push origin main
-
-git checkout custom/gallery
-git rebase main
-git push --force-with-lease origin custom/gallery
 ```
 
-如果仍保留单独的 `gpt55-defaults` 分支，也同步更新：
-
-```bash
-git checkout gpt55-defaults
-git rebase main
-git push --force-with-lease origin gpt55-defaults
-```
-
-`rebase` 会改写功能分支历史，推送必须使用 `--force-with-lease`，不要直接使用 `--force`。
+如果仍保留单独的 `gpt55-defaults` 分支，也可以按需 rebase；该分支不是当前生产发布分支。
 
 ### 1.3 冲突处理原则
 
@@ -109,20 +108,20 @@ git status
 处理原则：
 
 - 优先保留上游新增的安全修复、接口变化和迁移代码。
-- 保留本 fork 的自定义能力：GPT-5.5 默认模型、画廊、PeterAI 画图、支付和部署适配。
+- 保留本 fork 的自定义能力：GPT-5.5 默认模型、画廊、PeterAI 画图、支付、部署适配、多级代理层级与代理账户授权。
 - 如果同一段逻辑两边都改了，先读上游新逻辑，再把自定义逻辑重新套上去。
 
 解决后继续：
 
 ```bash
 git add <resolved-files>
-GIT_EDITOR=true git rebase --continue
+git commit
 ```
 
 需要中止时：
 
 ```bash
-git rebase --abort
+git merge --abort
 ```
 
 重要更新前建议创建备份分支：
@@ -133,17 +132,18 @@ git branch custom/gallery-backup-$(date +%Y%m%d) custom/gallery
 
 ### 1.4 当前远端差异与灾备优先级
 
-2026-06-30 检查结果：
+2026-06-30 上线后检查结果：
 
 ```text
 当前分支：custom/gallery
-本地 HEAD：135c1537
-upstream/main：c2754222
-origin/custom/gallery：1af7573a
-状态：custom/gallery...origin/custom/gallery [ahead 83, behind 7]
+本地 HEAD：57a1735d
+upstream/main：89b2d63e
+upstream tag：v0.1.140
+origin/custom/gallery：57a1735d
+状态：custom/gallery...origin/custom/gallery，无 ahead/behind
 ```
 
-这表示本机 `custom/gallery` 已包含 2026-06-28 上游同步和本 fork 修复，但 GitHub fork 的 `origin/custom/gallery` 仍不是可靠灾备来源。恢复生产时不能只依赖 `origin/custom/gallery`。
+这表示当前 `custom/gallery` 已合并官方 `v0.1.140`，并已推送到 GitHub fork。当前 `origin/custom/gallery` 可作为远端 Git 灾备来源，但生产恢复仍必须同时依赖数据库 dump、Docker volume 备份和 `deploy/.env`。
 
 已创建离线灾备：
 
@@ -151,9 +151,17 @@ origin/custom/gallery：1af7573a
 /home/aihub/Peter_ws/migration/sub2api-git-20260630-123303.bundle
 ```
 
+升级 `v0.1.140` 前已创建生产数据备份：
+
+```text
+/home/aihub/Peter_ws/sub2api-backups/20260630_163111
+Postgres dump: 73M
+App data tar.gz: 24M
+```
+
 优先处理顺序：
 
-1. 优先恢复 GitHub HTTPS/SSH 凭据，把 `main`、`custom/gallery`、`gpt55-defaults` 推送到 `origin`。
+1. 保持 GitHub SSH 凭据可用，确保 `custom/gallery` 能持续推送到 `origin`。
 2. 如果暂时不能推送，先创建本地 Git bundle 灾备：
 
 ```bash
@@ -191,7 +199,7 @@ git -C /home/aihub/Peter_ws/sub2api log --oneline --left-right origin/custom/gal
 当前运行约定：
 
 - Compose 项目名：`peter-sub2api`
-- 应用镜像：`sub2api-custom:20260628`
+- 应用镜像：`sub2api-custom:20260630-v0140`
 - 本机监听：`127.0.0.1:18080`
 - 容器服务端口：`8080`
 - Postgres：Compose 内部服务 `postgres`
@@ -285,7 +293,7 @@ backup S3 storage is not configured
 
 ```text
 COMPOSE_PROJECT_NAME=peter-sub2api
-SUB2API_IMAGE=sub2api-custom:20260628
+SUB2API_IMAGE=sub2api-custom:20260630-v0140
 BIND_HOST=127.0.0.1
 SERVER_PORT=18080
 GATEWAY_IMAGE_STREAM_DATA_INTERVAL_TIMEOUT=90
@@ -368,6 +376,14 @@ Postgres dump: 72M
 App data tar.gz: 24M
 sha256sum -c: OK
 pg_restore -l: 可读取
+```
+
+2026-06-30 升级 `v0.1.140` 前手动备份成功：
+
+```text
+/home/aihub/Peter_ws/sub2api-backups/20260630_163111
+Postgres dump: 73M
+App data tar.gz: 24M
 ```
 
 注意：本地备份只防误操作和短期回滚，不防服务器磁盘损坏或整机丢失。生产环境仍建议补齐 R2/S3 远端备份。
@@ -848,6 +864,191 @@ https://www.ezfpy.cn/
 - 示例正确地址：`https://api.peterai.cc.cd/payment/result`
 - 如果支付宝桌面端二维码未生成，优先调整易支付通道配置、跳转模式和浏览器拦截设置。
 
+### 4.6 多级代理层级与代理账户授权
+
+多级代理层级是本 fork 的自定义能力，不是上游原生功能。后续从 `upstream/main` 升级时必须保留这些文件和迁移。
+
+#### 4.6.1 功能边界
+
+第一版已上线能力：
+
+- 管理员后台可查看任意根用户的代理邀请树、团队充值和多级差价返利。
+- 管理员可在“代理层级”页面右上角添加代理账户，搜索用户、设置代理返利比例、开启代理层级访问。
+- 被授权用户可在用户侧看到“我的代理团队”，只能查看自己作为根节点的下级树。
+- 用户侧接口强制使用当前登录用户 ID 作为根节点，忽略任何前端伪造的 `root_user_id`。
+- 普通代理第一版只读，不能编辑返利比例，不能选择根节点，不能查看上级、兄弟代理或其他团队。
+
+返利结算规则：
+
+- 只扩展支付订单返利，覆盖余额充值订单和订阅订单。
+- 正数余额兑换码仍使用原直属返利方法，不扩展为多级差价。
+- 差价制示例：A 有效比例 `20%`，B 有效比例 `12%`，C 支付 `100`，B 得 `12`，A 得 `8`，总成本为 `20`。
+- 邀请链最多向上查 20 层，有循环保护。
+- 下级代理比例不能超过上级有效比例；父级降低比例时不能低于直属子级最高有效比例。
+- 历史订单不回算，不自动退款冲正。
+
+#### 4.6.2 数据库迁移
+
+自定义迁移文件：
+
+```text
+backend/migrations/9001_custom_affiliate_hierarchy.sql
+```
+
+使用 `9001_` 高编号是为了降低与上游新增迁移编号冲突的概率。后续升级时不要改回普通连续编号。
+
+该迁移包含：
+
+- 给 `user_affiliate_ledger` 增加多级审计字段：
+  - `affiliate_level`
+  - `downstream_user_id`
+  - `rebate_base_amount`
+  - `rebate_rate_percent`
+  - `recipient_rate_percent`
+  - `downstream_rate_percent`
+- 新增 `affiliate_agent_access` 表，用于控制用户侧代理层级页面访问权限。
+- 增加层级查询和流水查询索引。
+
+邀请树唯一来源仍是：
+
+```text
+user_affiliates.inviter_id
+```
+
+不要另建第二套邀请关系，否则返利结算、后台报表和用户侧边界会分裂。
+
+#### 4.6.3 后端代码位置
+
+核心服务：
+
+```text
+backend/internal/service/affiliate_service.go
+backend/internal/service/payment_fulfillment.go
+```
+
+核心仓储：
+
+```text
+backend/internal/repository/affiliate_repo.go
+```
+
+管理端接口：
+
+```text
+backend/internal/handler/admin/affiliate_handler.go
+backend/internal/server/routes/admin.go
+```
+
+用户侧接口：
+
+```text
+backend/internal/handler/user_handler.go
+backend/internal/server/routes/user.go
+```
+
+关键方法：
+
+```text
+AccrueInviteRebatesForPaymentOrder
+AdminGetHierarchy
+AdminSetHierarchyUserRate
+AdminSetAgentAccess
+GetMyAgentAccess
+GetMyAffiliateHierarchy
+```
+
+#### 4.6.4 API 边界
+
+管理端：
+
+```text
+GET /api/v1/admin/affiliates/hierarchy/roots
+GET /api/v1/admin/affiliates/hierarchy
+PUT /api/v1/admin/affiliates/hierarchy/users/:user_id/rate
+PUT /api/v1/admin/affiliates/hierarchy/users/:user_id/access
+```
+
+用户侧：
+
+```text
+GET /api/v1/user/aff/hierarchy/access
+GET /api/v1/user/aff/hierarchy
+```
+
+用户侧接口必须同时满足：
+
+- 邀请返利功能开启。
+- 当前用户在 `affiliate_agent_access` 中 `enabled = true`。
+- 根节点固定为当前 JWT 用户 ID。
+
+未授权访问应返回 `403`，不返回任何团队数据。
+
+#### 4.6.5 前端代码位置
+
+管理端页面：
+
+```text
+frontend/src/views/admin/affiliates/AdminAffiliateHierarchyView.vue
+frontend/src/api/admin/affiliateHierarchy.ts
+```
+
+用户侧页面：
+
+```text
+frontend/src/views/user/AffiliateHierarchyView.vue
+frontend/src/api/affiliateHierarchy.ts
+```
+
+路由和菜单：
+
+```text
+frontend/src/router/index.ts
+frontend/src/components/layout/AppSidebar.vue
+frontend/src/i18n/locales/zh.ts
+frontend/src/i18n/locales/en.ts
+```
+
+页面入口：
+
+```text
+管理员后台：/admin/affiliates/hierarchy
+用户侧：/affiliate/hierarchy
+```
+
+用户侧菜单通过 `GET /api/v1/user/aff/hierarchy/access` 判断是否显示。取消授权后，菜单隐藏；直接访问页面时后端仍会返回 `403`。
+
+#### 4.6.6 验证命令
+
+后端单元测试：
+
+```bash
+docker run --rm -v "$PWD/backend:/app" -w /app golang:1.26.4 go test -tags unit ./... -count=1
+```
+
+前端验证：
+
+```bash
+cd /home/aihub/Peter_ws/sub2api/frontend
+npm run typecheck -- --pretty false
+npm run lint:check -- src/views/admin/affiliates/AdminAffiliateHierarchyView.vue src/views/user/AffiliateHierarchyView.vue src/components/layout/AppSidebar.vue src/router/index.ts src/api/admin/affiliateHierarchy.ts src/api/affiliateHierarchy.ts
+npm run build
+```
+
+生产验证至少确认：
+
+```bash
+curl -sS http://127.0.0.1:18080/health
+curl -sS https://api.peterai.cc.cd/health
+```
+
+登录后台后检查：
+
+- `/admin/affiliates/hierarchy` 能打开。
+- “添加代理账户”按钮在过滤条件同一行，不挤占左侧筛选区。
+- 可搜索用户、设置比例、开启或取消代理层级访问。
+- 被授权用户登录后显示“我的代理团队”。
+- 未授权用户直接访问 `/affiliate/hierarchy` 无数据权限。
+
 ## 五、计费与数据修复
 
 ### 5.1 图片生成价格
@@ -995,7 +1196,12 @@ sg docker -c 'docker compose -f /home/aihub/Peter_ws/sub2api/deploy/docker-compo
 ```bash
 cd /home/aihub/Peter_ws/sub2api
 git checkout custom/gallery
-sg docker -c 'docker build -t sub2api-custom:YYYYMMDD .'
+
+# 涉及数据库迁移或上游升级时，先做本地备份。
+/home/aihub/Peter_ws/sub2api/deploy/local-backup.sh
+
+commit="$(git rev-parse --short=12 HEAD)"
+sg docker -c "docker build -t sub2api-custom:YYYYMMDD --build-arg GOPROXY=https://goproxy.cn,direct --build-arg GOSUMDB=sum.golang.google.cn --build-arg COMMIT=$commit -f Dockerfile ."
 # 构建成功后，把 /home/aihub/Peter_ws/sub2api/deploy/.env 里的 SUB2API_IMAGE 改成新 tag。
 sg docker -c 'docker compose -f /home/aihub/Peter_ws/sub2api/deploy/docker-compose.yml --env-file /home/aihub/Peter_ws/sub2api/deploy/.env up -d --force-recreate sub2api'
 /home/aihub/Peter_ws/sub2api/deploy/verify-production.sh
@@ -1119,7 +1325,43 @@ sg docker -c 'docker compose -f /home/aihub/Peter_ws/sub2api/deploy/docker-compo
 
 ### 2026-06-30
 
-- 基于真实代码和运行态完成维护文档优化：
+- 官方上游升级并上线：
+  - 已先提交并推送代理层级功能到 GitHub fork：`e24f68d1 feat: add affiliate agent hierarchy access`。
+  - 已从 `upstream/main` 合并官方最新版本：`v0.1.140`，上游 HEAD `89b2d63e`。
+  - 合并后当前 `custom/gallery` HEAD：`57a1735d`。
+  - 已推送到 `origin/custom/gallery`，当前本地与远端无 ahead/behind。
+- 新增并上线多级代理层级与代理账户授权：
+  - 管理员页面：`/admin/affiliates/hierarchy`。
+  - 用户侧页面：`/affiliate/hierarchy`，仅 `affiliate_agent_access.enabled = true` 的用户可见。
+  - 管理员可在“代理层级”页面添加代理账户、设置返利比例、开启或取消代理层级访问。
+  - 用户侧接口强制以当前登录用户为根节点，不能查看上级、兄弟或其他团队。
+  - 支付订单使用多级差价返利；正数余额兑换码仍保持直属返利。
+  - 自定义迁移文件：`backend/migrations/9001_custom_affiliate_hierarchy.sql`。
+- 升级前备份：
+  - `/home/aihub/Peter_ws/sub2api-backups/20260630_163111`
+  - Postgres dump：`73M`
+  - App data tar.gz：`24M`
+- 验证：
+  - 后端：`docker run --rm -v "$PWD/backend:/app" -w /app golang:1.26.4 go test -tags unit ./... -count=1` 通过。
+  - 前端：`npm run typecheck -- --pretty false` 通过。
+  - 前端：代理层级相关文件 `lint:check` 通过。
+  - 前端：`npm run build` 通过，仅有既有 Vite chunk / dynamic import 警告。
+  - `git diff --check` 通过。
+- 发布：
+  - 已构建镜像：`sub2api-custom:20260630-v0140`。
+  - `deploy/.env` 已指向 `SUB2API_IMAGE=sub2api-custom:20260630-v0140`。
+  - 仅重建应用容器 `sub2api`，Postgres / Redis 未重建。
+  - 当前容器状态：`peter-sub2api-sub2api-1` healthy，端口 `127.0.0.1:18080->8080`。
+- 生产验证：
+  - 本机健康检查：`http://127.0.0.1:18080/health -> {"status":"ok"}`。
+  - 公网健康检查：`https://api.peterai.cc.cd/health -> {"status":"ok"}`。
+  - `deploy/verify-production.sh` 通过。
+  - 当前画图页版本：`image-timeout-motion-20260627`。
+  - 公网 `main.js` 语法检查通过，`single_dollar_forEach = 0`。
+  - 图片价格仍为每张 `0.1`：所有用户组 `1K / 2K / 4K` 最小值和最大值均为 `0.10000000`。
+  - 仓库 `deploy/static/image-generator/` 与容器 `/app/data/public/image-generator/` hash 一致。
+
+- 早些时候基于真实代码和运行态完成维护文档优化：
   - 记录当前 `custom/gallery` 与 `origin/custom/gallery` 的分叉状态：本地 `ahead 83, behind 7`，本地 HEAD 为 `135c1537`。
   - 明确 `origin/custom/gallery` 不是当前生产代码的可靠灾备来源，新增 Git bundle 灾备流程。
   - 明确生产运行态由 `deploy/.env`、Compose、Docker volume、数据库设置共同决定。
@@ -1135,11 +1377,11 @@ sg docker -c 'docker compose -f /home/aihub/Peter_ws/sub2api/deploy/docker-compo
   - 已运行 `deploy/publish-image-generator.sh`，仓库静态文件与容器 volume 文件 hash 一致。
   - 已运行 `deploy/test-with-docker.sh backend`：`ok github.com/Wei-Shaw/sub2api/internal/service`
   - 已运行 `deploy/test-with-docker.sh frontend`：3 个测试文件、13 个测试通过。
-- 运行态检查结果：
-  - 当前运行镜像：`sub2api-custom:20260628`
+- 当时运行态检查结果：
+  - 当时运行镜像：`sub2api-custom:20260628`
   - 本机健康检查：`http://127.0.0.1:18080/health -> {"status":"ok"}`
   - 公网健康检查：`https://api.peterai.cc.cd/health -> {"status":"ok"}`
-  - 当前画图页版本：`image-timeout-motion-20260627`
+  - 当时画图页版本：`image-timeout-motion-20260627`
   - 公网 `main.js` 语法检查通过，`single_dollar_forEach = 0`
   - 图片价格仍为每张 `0.1`：所有用户组 `1K / 2K / 4K` 最小值和最大值均为 `0.10000000`
 

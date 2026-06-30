@@ -108,6 +108,23 @@ func (h *APIKeyHandler) List(c *gin.Context) {
 	response.Paginated(c, out, result.Total, page, pageSize)
 }
 
+// GetImageGenerationOptions returns image-capable API keys and models for PeterAI.
+// GET /api/v1/user/image-generation/options
+func (h *APIKeyHandler) GetImageGenerationOptions(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+
+	options, err := h.apiKeyService.GetImageGenerationOptions(c.Request.Context(), subject.UserID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, options)
+}
+
 // GetByID handles getting a single API key
 // GET /api/v1/api-keys/:id
 func (h *APIKeyHandler) GetByID(c *gin.Context) {
