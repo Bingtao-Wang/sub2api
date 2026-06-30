@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="referrer" content="no-referrer">
+    <title>PeterAI-在线图片生成</title>
+    <link rel="icon" type="image/svg+xml" href="peterai.svg">
+    <link rel="stylesheet" href="styles.css">
+</head>
+
+<body>
+    <div id="app">
+        <main class="page-layout">
+            <section class="image-experience" aria-label="图像体验">
+                <div class="image-shell">
+                    <div class="image-tabs" role="tablist" aria-label="Image experience modes">
+                        <button type="button" class="image-tab image-tab-active" data-mode="text" role="tab"
+                            id="tab-text" aria-selected="true" aria-controls="panel-text"><svg class="h-4 w-4"
+                                fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+                                <path stroke-linecap="round" stroke-linejoin="round"
+                                    d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 00-2.456 2.456z">
+                                </path>
+                            </svg><span>文生图</span></button><button type="button" class="image-tab" data-mode="image"
+                            role="tab" id="tab-image" aria-selected="false" aria-controls="panel-image"><svg
+                                class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"
+                                stroke-width="1.5">
+                                <path stroke-linecap="round" stroke-linejoin="round"
+                                    d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5">
+                                </path>
+                            </svg><span>图生图</span></button><button type="button" class="image-tab" data-mode="history"
+                            role="tab" id="tab-history" aria-selected="false" aria-controls="panel-history"><svg
+                                class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"
+                                stroke-width="1.5">
+                                <path stroke-linecap="round" stroke-linejoin="round"
+                                    d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                            </svg><span>记录1</span></button><button type="button" class="image-tab" data-mode="gallery"
+                            role="tab" id="tab-gallery" aria-selected="false" aria-controls="panel-gallery"><svg
+                                class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"
+                                stroke-width="1.5">
+                                <path stroke-linecap="round" stroke-linejoin="round"
+                                    d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z">
+                                </path>
+                            </svg><span>画廊</span></button>
+                    </div>
+                    <section id="panel-text" class="image-workbench mode-panel" data-panel="text" role="tabpanel"
+                        aria-labelledby="tab-text">
+                        <aside class="image-controls">
+                            <div class="image-field"><label class="input-label">API
+                                    密钥</label>
+                                <div class="relative"><button type="button" aria-expanded="false" aria-haspopup="true"
+                                        aria-label="Select option" class="select-trigger"><span
+                                            class="select-value">正在加载你的 API 密钥...</span><span class="select-icon"><svg
+                                                class="h-5 w-5 transition-transform duration-200" fill="none"
+                                                viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+                                                <path stroke-linecap="round" stroke-linejoin="round"
+                                                    d="M19.5 8.25l-7.5 7.5-7.5-7.5"></path>
+                                            </svg></span></button></div>
+                                <p class="input-hint">仅显示已启用图片生成的 OpenAI 分组密钥。</p>
+                            </div>
+                            <div class="image-field"><label class="input-label">模型</label>
+                                <div class="relative"><button type="button" aria-expanded="false" aria-haspopup="true"
+                                        aria-label="Select option" class="select-trigger"><span
+                                            class="select-value">gpt-image-2</span><span class="select-icon"><svg
+                                                class="h-5 w-5 transition-transform duration-200" fill="none"
+                                                viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+                                                <path stroke-linecap="round" stroke-linejoin="round"
+                                                    d="M19.5 8.25l-7.5 7.5-7.5-7.5"></path>
+                                            </svg></span></button></div>
+                            </div>
+                            <div class="image-field field-span field-ratio">
+                                <div class="image-row-label"><label class="input-label mb-0">画面比例</label></div>
+                                <div class="resolution-tier">
+                                    <button type="button" class="tier-btn tier-btn-active" data-tier="auto">自动</button>
+                                    <button type="button" class="tier-btn" data-tier="1k">1K</button>
+                                    <button type="button" class="tier-btn" data-tier="2k">2K</button>
+                                    <button type="button" class="tier-btn" data-tier="4k">4K</button>
+                                </div>
+                                <div class="ratio-grid">
+                                    <button type="button" class="ratio-card ratio-card-active"><span class="ratio-shape ratio-shape-auto" style="width:26px;height:26px"></span><span class="ratio-label">自动生成</span></button>
+                                    <button type="button" class="ratio-card"><span class="ratio-shape" style="width:26px;height:26px"></span><span class="ratio-label">1:1 正方形</span></button>
+                                    <button type="button" class="ratio-card"><span class="ratio-shape" style="width:26px;height:15px"></span><span class="ratio-label">16:9 横版</span></button>
+                                    <button type="button" class="ratio-card"><span class="ratio-shape" style="width:26px;height:20px"></span><span class="ratio-label">4:3 横版</span></button>
+                                    <button type="button" class="ratio-card"><span class="ratio-shape" style="width:20px;height:26px"></span><span class="ratio-label">3:4 竖版</span></button>
+                                    <button type="button" class="ratio-card"><span class="ratio-shape" style="width:15px;height:26px"></span><span class="ratio-label">9:16 竖版</span></button>
+                                </div>
+                                <p class="input-hint">分辨率档位会影响生成质量和费用，「自动」由模型自行决定。</p>
+                            </div>
+                            <div class="image-field field-span field-prompt">
+                                <div class="image-row-label"><label class="input-label mb-0">张数</label><span
+                                        class="image-active-value">1</span></div><input type=range min="1" max="5"
+                                    step="1" class="image-range" value="1">
+                            </div>
+                            <div class="image-field field-span">
+                                <label class="input-label mb-1.5 block">提示词</label>
+                                <textarea placeholder="描述画面的主体、风格、光线、构图... 越具体效果越好" rows="5"
+                                    class="input prompt-textarea"></textarea>
+                                <div class="char-count">0 字符</div>
+                                <div class="prompt-chips">
+                                    <button type="button" class="prompt-chip">赛博朋克城市夜景，霓虹雨夜，电影感光影，8k</button>
+                                    <button type="button" class="prompt-chip">一只金色胖胖大柴犬坐在办公桌前，油画质感</button>
+                                    <button type="button" class="prompt-chip">极简几何海报，蓝橙配色，主体是一只慵懒的猫</button>
+                                    <button type="button" class="prompt-chip">童话风格蘑菇屋，黄昏光线，柔和景深</button>
+                                    <button type="button" class="prompt-chip">日系动漫少女，樱花飘落，柔和光线，细腻画风</button>
+                                    <button type="button" class="prompt-chip">水彩风格山水画，雾气缭绕，远山如黛</button>
+                                    <button type="button" class="prompt-chip">未来科技城市，飞行汽车，全息广告牌</button>
+                                    <button type="button" class="prompt-chip">复古胶片风格人像，暖色调，颗粒质感</button>
+                                </div>
+                            </div>
+                            <details class="advanced-panel">
+                                <summary><span class="flex items-center gap-2"><svg class="h-4 w-4" fill="none"
+                                            viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+                                            <path stroke-linecap="round" stroke-linejoin="round"
+                                                d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.324.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.24-.438.613-.431.992a6.759 6.759 0 010 .255c-.007.378.138.75.43.99l1.005.828c.424.35.534.954.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.57 6.57 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.28c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.02-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.992a6.932 6.932 0 010-.255c.007-.378-.138-.75-.43-.99l-1.004-.828a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.087.22-.128.332-.183.582-.495.644-.869l.214-1.281z M15 12a3 3 0 11-6 0 3 3 0 016 0z">
+                                            </path>
+                                        </svg> 高级参数</span><svg class="h-4 w-4" fill="none" viewBox="0 0 24 24"
+                                        stroke="currentColor" stroke-width="1.5">
+                                        <path stroke-linecap="round" stroke-linejoin="round"
+                                            d="M19.5 8.25l-7.5 7.5-7.5-7.5"></path>
+                                    </svg></summary>
+                                <div class="advanced-body">
+                                    <div class="image-field"><label class="input-label">质量档位</label>
+                                        <div class="relative"><button type="button" aria-expanded="false"
+                                                aria-haspopup="true" aria-label="Select option"
+                                                class="select-trigger"><span class="select-value">自动</span><span
+                                                    class="select-icon"><svg
+                                                        class="h-5 w-5 transition-transform duration-200" fill="none"
+                                                        viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+                                                        <path stroke-linecap="round" stroke-linejoin="round"
+                                                            d="M19.5 8.25l-7.5 7.5-7.5-7.5"></path>
+                                                    </svg></span></button></div>
+                                    </div>
+                                    <div class="image-field"><label class="input-label">背景</label>
+                                        <div class="relative"><button type="button" aria-expanded="false"
+                                                aria-haspopup="true" aria-label="Select option"
+                                                class="select-trigger"><span class="select-value">自动</span><span
+                                                    class="select-icon"><svg
+                                                        class="h-5 w-5 transition-transform duration-200" fill="none"
+                                                        viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+                                                        <path stroke-linecap="round" stroke-linejoin="round"
+                                                            d="M19.5 8.25l-7.5 7.5-7.5-7.5"></path>
+                                                    </svg></span></button></div>
+                                        <p class="input-hint">透明背景只对 PNG/WebP 生效。</p>
+                                    </div>
+                                    <div class="image-field"><label class="input-label">输出格式</label>
+                                        <div class="relative"><button type="button" aria-expanded="false"
+                                                aria-haspopup="true" aria-label="Select option"
+                                                class="select-trigger"><span class="select-value">PNG</span><span
+                                                    class="select-icon"><svg
+                                                        class="h-5 w-5 transition-transform duration-200" fill="none"
+                                                        viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+                                                        <path stroke-linecap="round" stroke-linejoin="round"
+                                                            d="M19.5 8.25l-7.5 7.5-7.5-7.5"></path>
+                                                    </svg></span></button></div>
+                                        <p class="input-hint">WebP 体积更小；PNG 兼容性更好。</p>
+                                    </div>
+                                </div>
+                            </details>
+                            <div class="cost-card">
+                                <div>
+                                    <p class="cost-label">预估费用</p>
+                                    <p class="cost-hint">统一价每张 $0.1</p>
+                                </div><span class="cost-value">$0.10</span>
+                            </div><button type="button" class="btn btn-primary image-submit"><svg
+                                    class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"
+                                    stroke-width="1.5">
+                                    <path stroke-linecap="round" stroke-linejoin="round"
+                                        d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 00-2.456 2.456z">
+                                    </path>
+                                </svg> 生成图片</button>
+                        </aside>
+                        <section class="image-canvas">
+                        </section>
+                    </section>
+                    <section id="panel-image" class="image-workbench mode-panel" data-panel="image" role="tabpanel"
+                        aria-labelledby="tab-image" hidden aria-hidden="true">
+                        <aside class="image-controls">
+                            <div class="image-field"><label class="input-label">API
+                                    密钥</label>
+                                <div class="relative"><button type="button" aria-expanded="false" aria-haspopup="true"
+                                        aria-label="Select option" class="select-trigger"><span
+                                            class="select-value">正在加载你的 API 密钥...</span><span class="select-icon"><svg
+                                                class="h-5 w-5 transition-transform duration-200" fill="none"
+                                                viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+                                                <path stroke-linecap="round" stroke-linejoin="round"
+                                                    d="M19.5 8.25l-7.5 7.5-7.5-7.5"></path>
+                                            </svg></span></button></div>
+                                <p class="input-hint">仅显示已启用图片生成的 OpenAI 分组密钥。</p>
+                            </div>
+                            <div class="image-field"><label class="input-label">模型</label>
+                                <div class="relative"><button type="button" aria-expanded="false" aria-haspopup="true"
+                                        aria-label="Select option" class="select-trigger"><span
+                                            class="select-value">gpt-image-2</span><span class="select-icon"><svg
+                                                class="h-5 w-5 transition-transform duration-200" fill="none"
+                                                viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+                                                <path stroke-linecap="round" stroke-linejoin="round"
+                                                    d="M19.5 8.25l-7.5 7.5-7.5-7.5"></path>
+                                            </svg></span></button></div>
+                            </div>
+                            <div class="image-field field-span field-reference">
+                                <div class="image-row-label"><label class="input-label mb-0">参考图</label><span
+                                        class="image-muted">0 / 4</span></div><label class="reference-upload"><input
+                                        type=file accept="image/png,image/jpeg,image/webp" multiple class="sr-only"><svg
+                                        class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"
+                                        stroke-width="1.5">
+                                        <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15">
+                                        </path>
+                                    </svg><span>添加图片</span></label>
+                                <p class="input-hint">支持 PNG / JPG / WebP，单张最大 20MB，最多 4 张。</p>
+                                <div class="mock-reference-list"></div>
+                            </div>
+                            <div class="image-field field-span field-ratio">
+                                <div class="image-row-label"><label class="input-label mb-0">画面比例</label></div>
+                                <div class="resolution-tier">
+                                    <button type="button" class="tier-btn tier-btn-active" data-tier="auto">自动</button>
+                                    <button type="button" class="tier-btn" data-tier="1k">1K</button>
+                                    <button type="button" class="tier-btn" data-tier="2k">2K</button>
+                                    <button type="button" class="tier-btn" data-tier="4k">4K</button>
+                                </div>
+                                <div class="ratio-grid">
+                                    <button type="button" class="ratio-card ratio-card-active"><span class="ratio-shape ratio-shape-auto" style="width:26px;height:26px"></span><span class="ratio-label">自动生成</span></button>
+                                    <button type="button" class="ratio-card"><span class="ratio-shape" style="width:26px;height:26px"></span><span class="ratio-label">1:1 正方形</span></button>
+                                    <button type="button" class="ratio-card"><span class="ratio-shape" style="width:26px;height:15px"></span><span class="ratio-label">16:9 横版</span></button>
+                                    <button type="button" class="ratio-card"><span class="ratio-shape" style="width:26px;height:20px"></span><span class="ratio-label">4:3 横版</span></button>
+                                    <button type="button" class="ratio-card"><span class="ratio-shape" style="width:20px;height:26px"></span><span class="ratio-label">3:4 竖版</span></button>
+                                    <button type="button" class="ratio-card"><span class="ratio-shape" style="width:15px;height:26px"></span><span class="ratio-label">9:16 竖版</span></button>
+                                </div>
+                                <p class="input-hint">分辨率档位会影响生成质量和费用，「自动」由模型自行决定。</p>
+                            </div>
+                            <div class="image-field field-span field-prompt">
+                                <div class="image-row-label"><label class="input-label mb-0">张数</label><span
+                                        class="image-active-value">1</span></div><input type=range min="1" max="5"
+                                    step="1" class="image-range" value="1">
+                            </div>
+                            <div class="image-field field-span">
+                                <label class="input-label mb-1.5 block">提示词</label>
+                                <textarea placeholder="描述画面的主体、风格、光线、构图... 越具体效果越好" rows="5"
+                                    class="input prompt-textarea"></textarea>
+                                <div class="char-count">0 字符</div>
+                                <div class="prompt-chips">
+                                    <button type="button" class="prompt-chip">赛博朋克城市夜景，霓虹雨夜，电影感光影，8k</button>
+                                    <button type="button" class="prompt-chip">一只金色胖胖大柴犬坐在办公桌前，油画质感</button>
+                                    <button type="button" class="prompt-chip">极简几何海报，蓝橙配色，主体是一只慵懒的猫</button>
+                                    <button type="button" class="prompt-chip">童话风格蘑菇屋，黄昏光线，柔和景深</button>
+                                    <button type="button" class="prompt-chip">日系动漫少女，樱花飘落，柔和光线，细腻画风</button>
+                                    <button type="button" class="prompt-chip">水彩风格山水画，雾气缭绕，远山如黛</button>
+                                    <button type="button" class="prompt-chip">未来科技城市，飞行汽车，全息广告牌</button>
+                                    <button type="button" class="prompt-chip">复古胶片风格人像，暖色调，颗粒质感</button>
+                                </div>
+                            </div>
+                            <details class="advanced-panel">
+                                <summary><span class="flex items-center gap-2"><svg class="h-4 w-4" fill="none"
+                                            viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+                                            <path stroke-linecap="round" stroke-linejoin="round"
+                                                d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.324.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.24-.438.613-.431.992a6.759 6.759 0 010 .255c-.007.378.138.75.43.99l1.005.828c.424.35.534.954.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.57 6.57 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.28c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.02-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.992a6.932 6.932 0 010-.255c.007-.378-.138-.75-.43-.99l-1.004-.828a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.087.22-.128.332-.183.582-.495.644-.869l.214-1.281z M15 12a3 3 0 11-6 0 3 3 0 016 0z">
+                                            </path>
+                                        </svg> 高级参数</span><svg class="h-4 w-4" fill="none" viewBox="0 0 24 24"
+                                        stroke="currentColor" stroke-width="1.5">
+                                        <path stroke-linecap="round" stroke-linejoin="round"
+                                            d="M19.5 8.25l-7.5 7.5-7.5-7.5"></path>
+                                    </svg></summary>
+                                <div class="advanced-body">
+                                    <div class="image-field"><label class="input-label">质量档位</label>
+                                        <div class="relative"><button type="button" aria-expanded="false"
+                                                aria-haspopup="true" aria-label="Select option"
+                                                class="select-trigger"><span class="select-value">自动</span><span
+                                                    class="select-icon"><svg
+                                                        class="h-5 w-5 transition-transform duration-200" fill="none"
+                                                        viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+                                                        <path stroke-linecap="round" stroke-linejoin="round"
+                                                            d="M19.5 8.25l-7.5 7.5-7.5-7.5"></path>
+                                                    </svg></span></button></div>
+                                    </div>
+                                    <div class="image-field"><label class="input-label">背景</label>
+                                        <div class="relative"><button type="button" aria-expanded="false"
+                                                aria-haspopup="true" aria-label="Select option"
+                                                class="select-trigger"><span class="select-value">自动</span><span
+                                                    class="select-icon"><svg
+                                                        class="h-5 w-5 transition-transform duration-200" fill="none"
+                                                        viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+                                                        <path stroke-linecap="round" stroke-linejoin="round"
+                                                            d="M19.5 8.25l-7.5 7.5-7.5-7.5"></path>
+                                                    </svg></span></button></div>
+                                        <p class="input-hint">透明背景只对 PNG/WebP 生效。</p>
+                                    </div>
+                                    <div class="image-field"><label class="input-label">输出格式</label>
+                                        <div class="relative"><button type="button" aria-expanded="false"
+                                                aria-haspopup="true" aria-label="Select option"
+                                                class="select-trigger"><span class="select-value">PNG</span><span
+                                                    class="select-icon"><svg
+                                                        class="h-5 w-5 transition-transform duration-200" fill="none"
+                                                        viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+                                                        <path stroke-linecap="round" stroke-linejoin="round"
+                                                            d="M19.5 8.25l-7.5 7.5-7.5-7.5"></path>
+                                                    </svg></span></button></div>
+                                        <p class="input-hint">WebP 体积更小；PNG 兼容性更好。</p>
+                                    </div>
+                                </div>
+                            </details>
+                            <div class="cost-card">
+                                <div>
+                                    <p class="cost-label">预估费用</p>
+                                    <p class="cost-hint">统一价每张 $0.1</p>
+                                </div><span class="cost-value">$0.10</span>
+                            </div><button type="button" class="btn btn-primary image-submit"><svg
+                                    class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"
+                                    stroke-width="1.5">
+                                    <path stroke-linecap="round" stroke-linejoin="round"
+                                        d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 00-2.456 2.456z">
+                                    </path>
+                                </svg> 生成图片</button>
+                        </aside>
+                        <section class="image-canvas">
+                        </section>
+                    </section>
+                    <section id="panel-history" class="history-panel mode-panel" data-panel="history" role="tabpanel"
+                        aria-labelledby="tab-history" hidden aria-hidden="true">
+                        <div class="history-head">
+                            <h2>最近生成</h2>
+                            <p>服务器存储空间有限，仅保存近期 5 张，请及时保存！</p>
+                        </div>
+                        <div class="history-list">
+                        </div>
+                    </section>
+                    <section id="panel-gallery" class="gallery-panel mode-panel" data-panel="gallery" role="tabpanel"
+                        aria-labelledby="tab-gallery" hidden aria-hidden="true">
+                        <div class="history-head">
+                            <h2>社区画廊</h2>
+                            <p>默认展示最近发布的公开图片，提示词可复制或重新生成。</p>
+                        </div>
+                        <div class="gallery-grid" data-gallery-grid>
+                        </div>
+                        <div class="gallery-load">
+                            <button type="button" class="history-clear-btn gallery-more-btn" data-gallery-more>加载更多</button>
+                        </div>
+                    </section>
+                </div>
+            </section>
+        </main>
+    </div>
+    <script src="main.js?v=image-timeout-motion-20260627" defer></script>
+</body>
+</html>

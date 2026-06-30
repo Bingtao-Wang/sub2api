@@ -8,11 +8,13 @@
   - [1.1 当前分支模型](#11-当前分支模型)
   - [1.2 日常同步流程](#12-日常同步流程)
   - [1.3 冲突处理原则](#13-冲突处理原则)
+  - [1.4 当前远端差异与灾备优先级](#14-当前远端差异与灾备优先级)
 - [二、Docker 迁移部署](#二docker-迁移部署)
   - [2.1 当前部署状态](#21-当前部署状态)
   - [2.2 镜像构建策略](#22-镜像构建策略)
   - [2.3 Compose 隔离约定](#23-compose-隔离约定)
   - [2.4 数据恢复与备份](#24-数据恢复与备份)
+  - [2.5 运行时配置真相源](#25-运行时配置真相源)
 - [三、公网访问与域名](#三公网访问与域名)
   - [3.1 本机访问入口](#31-本机访问入口)
   - [3.2 Cloudflare Tunnel](#32-cloudflare-tunnel)
@@ -31,7 +33,9 @@
   - [6.1 常用验证命令](#61-常用验证命令)
   - [6.2 发布流程](#62-发布流程)
   - [6.3 回滚流程](#63-回滚流程)
+  - [6.4 宿主机缺少构建工具时的替代验证](#64-宿主机缺少构建工具时的替代验证)
 - [七、更新记录](#七更新记录)
+  - [2026-06-30](#2026-06-30)
   - [2026-06-28](#2026-06-28)
   - [2026-06-27](#2026-06-27)
   - [2026-06-23](#2026-06-23)
@@ -126,6 +130,47 @@ git rebase --abort
 git branch custom/gallery-backup-$(date +%Y%m%d) custom/gallery
 ```
 
+### 1.4 当前远端差异与灾备优先级
+
+2026-06-30 检查结果：
+
+```text
+当前分支：custom/gallery
+本地 HEAD：135c1537
+upstream/main：c2754222
+origin/custom/gallery：1af7573a
+状态：custom/gallery...origin/custom/gallery [ahead 83, behind 7]
+```
+
+这表示本机 `custom/gallery` 已包含 2026-06-28 上游同步和本 fork 修复，但 GitHub fork 的 `origin/custom/gallery` 仍不是可靠灾备来源。恢复生产时不能只依赖 `origin/custom/gallery`。
+
+已创建离线灾备：
+
+```text
+/home/aihub/Peter_ws/migration/sub2api-git-20260630-123303.bundle
+```
+
+优先处理顺序：
+
+1. 优先恢复 GitHub HTTPS/SSH 凭据，把 `main`、`custom/gallery`、`gpt55-defaults` 推送到 `origin`。
+2. 如果暂时不能推送，先创建本地 Git bundle 灾备：
+
+```bash
+mkdir -p /home/aihub/Peter_ws/migration
+bundle=/home/aihub/Peter_ws/migration/sub2api-git-$(date +%Y%m%d-%H%M%S).bundle
+git -C /home/aihub/Peter_ws/sub2api bundle create "$bundle" --all
+git -C /home/aihub/Peter_ws/sub2api bundle verify "$bundle"
+```
+
+3. 画图页静态文件已纳入仓库 `deploy/static/image-generator/`，后续以该目录为版本化真相源，见 [4.3.1](#431-真实入口与文件位置)。
+
+推送前必须重新确认：
+
+```bash
+git -C /home/aihub/Peter_ws/sub2api status --short --branch
+git -C /home/aihub/Peter_ws/sub2api log --oneline --left-right origin/custom/gallery...custom/gallery | head -120
+```
+
 ## 二、Docker 迁移部署
 
 ### 2.1 当前部署状态
@@ -216,6 +261,39 @@ sg docker -c 'docker compose exec postgres sh -lc '\''PGPASSWORD="$POSTGRES_PASS
 sg docker -c 'docker run --rm -v peter-sub2api_sub2api_data:/data -v /home/aihub/Peter_ws/migration:/backup alpine sh -lc '\''cd /data && tar -xzf /backup/sub2api_appdata_20260622_163819.tar.gz'\'''
 ```
 
+### 2.5 运行时配置真相源
+
+生产运行时以 `deploy/.env` + `deploy/docker-compose.yml` + Docker volume + 数据库设置共同决定，不能只看源码默认值。
+
+当前关键 `.env` 覆盖：
+
+```text
+COMPOSE_PROJECT_NAME=peter-sub2api
+SUB2API_IMAGE=sub2api-custom:20260628
+BIND_HOST=127.0.0.1
+SERVER_PORT=18080
+GATEWAY_IMAGE_STREAM_DATA_INTERVAL_TIMEOUT=90
+```
+
+注意：
+
+- `deploy/docker-compose.yml` 里 `GATEWAY_IMAGE_STREAM_DATA_INTERVAL_TIMEOUT` 默认仍是 `900`，生产依赖 `.env` 覆盖为 `90`。
+- `deploy/.env` 可能包含数据库密码、JWT secret、支付密钥等敏感信息，不要提交到 Git。
+- 迁移或重装时，必须安全迁移 `.env`，否则图片生成超时、登录态、TOTP、支付等行为可能变化。
+
+只查看非敏感运行关键项：
+
+```bash
+grep -E '^(COMPOSE_PROJECT_NAME|SUB2API_IMAGE|BIND_HOST|SERVER_PORT|GATEWAY_IMAGE_STREAM_DATA_INTERVAL_TIMEOUT)=' /home/aihub/Peter_ws/sub2api/deploy/.env
+```
+
+完整运行态确认：
+
+```bash
+sg docker -c 'docker inspect peter-sub2api-sub2api-1 --format "{{.Config.Image}}"'
+sg docker -c 'docker compose -f /home/aihub/Peter_ws/sub2api/deploy/docker-compose.yml --env-file /home/aihub/Peter_ws/sub2api/deploy/.env ps'
+```
+
 ## 三、公网访问与域名
 
 ### 3.1 本机访问入口
@@ -273,6 +351,23 @@ api.peterai.cc.cd   -> http://localhost:18080
 
 `gpt55-defaults` 和 `custom/gallery` 都包含 GPT-5.5 默认模型相关提交。上游同步后，如果默认模型相关文件冲突，需要确认 UI 默认值、后端模型默认值和文案一致。
 
+当前关键代码位置：
+
+```text
+frontend/src/utils/clientConfig.ts
+frontend/src/components/keys/UseKeyModal.vue
+frontend/src/views/user/UsageTutorialView.vue
+frontend/src/composables/useModelWhitelist.ts
+backend/resources/model-pricing/model_prices_and_context_window.json
+backend/internal/pkg/openai/instructions_gpt5_5.txt
+```
+
+核心验收点：
+
+- Codex 配置生成器默认 `model = "gpt-5.5"` 和 `review_model = "gpt-5.5"`。
+- Claude Code 模板保留上游新增的 `CLAUDE_CODE_ATTRIBUTION_HEADER=0`。
+- 后台模型白名单、使用教程、价格资源里都能识别 `gpt-5.5`。
+
 ### 4.2 图片画廊
 
 画廊功能在 `custom/gallery` 中维护。当前要求：
@@ -281,6 +376,29 @@ api.peterai.cc.cd   -> http://localhost:18080
 - 最近生成和画廊展示应使用清晰图片。
 - 下载应尽量使用原图，不使用压缩预览图。
 - 静态页面位于 Docker volume 的 `/app/data/public/image-generator/`。
+
+当前真实实现边界：
+
+```text
+backend/migrations/150_image_gallery_items.sql
+backend/internal/service/gallery.go
+backend/internal/repository/gallery_repo.go
+backend/internal/handler/gallery_handler.go
+backend/internal/handler/admin/gallery_handler.go
+backend/internal/server/routes/user.go
+backend/internal/server/routes/admin.go
+frontend/src/api/admin/gallery.ts
+frontend/src/views/admin/GalleryView.vue
+```
+
+路由边界：
+
+- 用户登录后：`POST /api/v1/gallery/items`、`GET /api/v1/gallery/my`、`DELETE /api/v1/gallery/items/:id`
+- 公开画廊：`GET /api/v1/gallery/items`
+- 公开媒体：`GET /api/v1/gallery/media/*path`
+- 管理后台：`/api/v1/admin/gallery/*`
+
+画廊文件默认落在应用数据目录下，随 `sub2api_data` volume 迁移；数据库只保存相对路径和元信息。
 
 线上静态文件可通过 volume 检查：
 
@@ -306,11 +424,44 @@ https://api.peterai.cc.cd/custom/6768ebe29836ec72
 https://api.peterai.cc.cd/image-generator/
 ```
 
-重要：画图页不是 Vue 前端编译产物，不需要 `pnpm build`。生产优先生效路径是 Docker volume 中的静态覆盖目录：
+重要：画图页不是 Vue 前端编译产物，不需要 `pnpm build`。后端代码会优先从 `data/public/<path>` 服务本地覆盖文件，再回退到嵌入的 Vue SPA。相关代码：
+
+```text
+backend/internal/web/embed_on.go
+backend/internal/server/middleware/security_headers.go
+frontend/src/utils/embedded-url.ts
+frontend/src/views/user/CustomPageView.vue
+```
+
+生产优先生效路径是 Docker volume 中的静态覆盖目录：
 
 ```text
 /app/data/public/image-generator/
 ```
+
+版本化静态文件目录：
+
+```text
+/home/aihub/Peter_ws/sub2api/deploy/static/image-generator/
+```
+
+当前包含：
+
+```text
+index.html
+main.js
+styles.css
+peterai.svg
+```
+
+历史宿主机源文件仍存在：
+
+```text
+/home/aihub/Peter_ws/image-generator-index.html
+/home/aihub/Peter_ws/image-generator-main.js
+```
+
+这两个历史文件不再作为唯一真相源。修改画图页时优先改 `deploy/static/image-generator/`，再用发布脚本覆盖到 Docker volume。
 
 宿主机当前对应 Docker volume：
 
@@ -329,33 +480,50 @@ sg docker -c 'docker run --rm -v peter-sub2api_sub2api_data:/data alpine sh -lc 
 
 修改画图页时按以下顺序做，缺任何一步都可能导致用户仍加载旧代码：
 
-1. 修改本地源文件：
-   - `/home/aihub/Peter_ws/image-generator-index.html`
-   - `/home/aihub/Peter_ws/image-generator-main.js`
-2. 修改 `image-generator-index.html` 里的 `main.js?v=...` 版本号。
+1. 修改版本化源文件：
+   - `/home/aihub/Peter_ws/sub2api/deploy/static/image-generator/index.html`
+   - `/home/aihub/Peter_ws/sub2api/deploy/static/image-generator/main.js`
+   - `/home/aihub/Peter_ws/sub2api/deploy/static/image-generator/styles.css`
+   - `/home/aihub/Peter_ws/sub2api/deploy/static/image-generator/peterai.svg`
+2. 修改 `index.html` 里的 `main.js?v=...` 版本号。
 3. 语法检查：
 
 ```bash
-node -c /home/aihub/Peter_ws/image-generator-main.js
+node -c /home/aihub/Peter_ws/sub2api/deploy/static/image-generator/main.js
 ```
 
-4. 复制静态文件到正在运行的容器覆盖目录：
+4. 发布到正在运行的容器覆盖目录：
 
 ```bash
-sg docker -c 'docker exec peter-sub2api-sub2api-1 sh -lc "mkdir -p /app/data/public/image-generator"'
-sg docker -c 'docker cp /home/aihub/Peter_ws/image-generator-index.html peter-sub2api-sub2api-1:/app/data/public/image-generator/index.html'
-sg docker -c 'docker cp /home/aihub/Peter_ws/image-generator-main.js peter-sub2api-sub2api-1:/app/data/public/image-generator/main.js'
+/home/aihub/Peter_ws/sub2api/deploy/publish-image-generator.sh
 ```
 
-5. 如果 `/custom/<id>` 的 iframe URL 需要强制刷新缓存，同步更新数据库 `settings.custom_menu_items` 中该菜单 URL 的查询参数，例如 `?v=image-502-failover-20260627`。
-6. 重启应用容器，清掉后端 `HTMLCache`，否则 `/custom/<id>` HTML 里可能仍注入旧菜单 URL：
+需要同时清理 `/custom/<id>` 注入配置缓存时：
+
+```bash
+RESTART=1 /home/aihub/Peter_ws/sub2api/deploy/publish-image-generator.sh
+```
+
+5. 对比版本化文件和容器实际文件：
+
+```bash
+sha256sum /home/aihub/Peter_ws/sub2api/deploy/static/image-generator/*
+sg docker -c 'docker exec peter-sub2api-sub2api-1 sh -lc "sha256sum /app/data/public/image-generator/index.html /app/data/public/image-generator/main.js"'
+```
+
+6. 如果 `/custom/<id>` 的 iframe URL 需要强制刷新缓存，同步更新数据库 `settings.custom_menu_items` 中该菜单 URL 的查询参数，例如 `?v=image-502-failover-20260627`。
+7. 重启应用容器，清掉后端 `HTMLCache`，否则 `/custom/<id>` HTML 里可能仍注入旧菜单 URL：
 
 ```bash
 sg docker -c 'docker restart peter-sub2api-sub2api-1'
 curl -sS http://127.0.0.1:18080/health
 ```
 
-7. 使用公网 URL 验证，不能只看本地文件。
+8. 使用公网 URL 验证，不能只看本地文件：
+
+```bash
+/home/aihub/Peter_ws/sub2api/deploy/verify-production.sh
+```
 
 #### 4.3.3 生图 HTTP 502 排查要点
 
@@ -638,8 +806,15 @@ actual_cost = 0.1000000000
 
 ```text
 backend/internal/service/openai_images.go
+backend/internal/service/openai_images_responses.go
 backend/internal/service/openai_images_test.go
 ```
+
+当前代码注意点：
+
+- `backend/internal/service/openai_images.go` 的主 Images API 路径已把 `imageCount` 初始化为 `0`，非流式响应只有解析到图片输出时才增加计费张数。
+- `backend/internal/service/openai_images_responses.go` 的 OAuth/Responses 转换路径在无图时会优先返回 `UpstreamFailoverError` 或上游拒绝错误；正常成功返回前仍有 `if imageCount <= 0 { imageCount = parsed.N }` 兜底。按当前上下文，这个兜底通常不会处理“HTTP 200 但无图”的失败场景，但后续改动时应避免让无图响应正常落入成功计费路径。
+- 如果继续维护图片计费，建议增加覆盖 OAuth/Responses 转换路径的无图回归测试，防止将来重构时重新引入失败扣费。
 
 已处理历史失败扣费：
 
@@ -695,6 +870,12 @@ sg docker -c 'docker compose -f /home/aihub/Peter_ws/sub2api/deploy/docker-compo
 画图页发布验证：
 
 ```bash
+/home/aihub/Peter_ws/sub2api/deploy/verify-production.sh
+```
+
+手工拆分验证：
+
+```bash
 # 1. 父级自定义页应注入新版 iframe URL
 curl -k -sS https://api.peterai.cc.cd/custom/6768ebe29836ec72 -o /tmp/custom-page.html
 grep -o 'image-generator/?v=[^"\\]*' /tmp/custom-page.html | head
@@ -739,7 +920,14 @@ git checkout custom/gallery
 sg docker -c 'docker build -t sub2api-custom:YYYYMMDD .'
 # 构建成功后，把 /home/aihub/Peter_ws/sub2api/deploy/.env 里的 SUB2API_IMAGE 改成新 tag。
 sg docker -c 'docker compose -f /home/aihub/Peter_ws/sub2api/deploy/docker-compose.yml --env-file /home/aihub/Peter_ws/sub2api/deploy/.env up -d --force-recreate sub2api'
-curl -sS https://api.peterai.cc.cd/health
+/home/aihub/Peter_ws/sub2api/deploy/verify-production.sh
+```
+
+只发布 PeterAI 画图页静态文件：
+
+```bash
+/home/aihub/Peter_ws/sub2api/deploy/publish-image-generator.sh
+/home/aihub/Peter_ws/sub2api/deploy/verify-production.sh
 ```
 
 发布后检查：
@@ -767,7 +955,115 @@ sg docker -c 'docker compose -f /home/aihub/Peter_ws/sub2api/deploy/docker-compo
 
 不要删除数据库或 volume。回滚应用镜像通常不需要动 Postgres/Redis。
 
+### 6.4 宿主机缺少构建工具时的替代验证
+
+2026-06-30 检查时，宿主机直接运行：
+
+```bash
+go test ./internal/service -run 'OpenAIImages|Gallery'
+pnpm vitest run src/utils/__tests__/embedded-url.spec.ts
+```
+
+返回：
+
+```text
+go: command not found
+pnpm: command not found
+```
+
+这表示当前宿主机不能直接执行 Go/前端单测。此时不要把“无法运行单测”误判为“功能已验证充分”，应至少完成以下运行态替代验证：
+
+当前已提供 Docker 测试脚本，不依赖宿主机安装 Go/pnpm：
+
+```bash
+# 后端 Images/Gallery 相关测试
+/home/aihub/Peter_ws/sub2api/deploy/test-with-docker.sh backend
+
+# 前端关键测试
+/home/aihub/Peter_ws/sub2api/deploy/test-with-docker.sh frontend
+
+# 全部默认测试
+/home/aihub/Peter_ws/sub2api/deploy/test-with-docker.sh
+```
+
+2026-06-30 已验证：
+
+```text
+backend: ok github.com/Wei-Shaw/sub2api/internal/service
+frontend: 3 files passed, 13 tests passed
+```
+
+运行态替代验证：
+
+```bash
+# 1. 容器和镜像
+/home/aihub/Peter_ws/sub2api/deploy/verify-production.sh
+```
+
+脚本会自动检查：
+
+- 容器状态和当前镜像 tag
+- 本机和公网 `/health`
+- `/custom/<id>` 注入的 `image-generator/?v=...`
+- 公网 `/image-generator/` 引用的 `main.js?v=...`
+- 公网 `main.js` 语法和 `single_dollar_forEach = 0`
+- 图片价格是否均为 `0.10000000`
+- 仓库静态文件与容器静态文件 hash
+
+也可手工拆分执行：
+
+```bash
+# 1. 容器和镜像
+sg docker -c 'docker compose -f /home/aihub/Peter_ws/sub2api/deploy/docker-compose.yml --env-file /home/aihub/Peter_ws/sub2api/deploy/.env ps'
+sg docker -c 'docker inspect peter-sub2api-sub2api-1 --format "{{.Config.Image}}"'
+
+# 2. 本机和公网健康检查
+curl -sS --max-time 10 http://127.0.0.1:18080/health
+curl -k -sS --max-time 15 https://api.peterai.cc.cd/health
+
+# 3. 画图页真实公网链路
+curl -k -sS --max-time 15 https://api.peterai.cc.cd/custom/6768ebe29836ec72 -o /tmp/custom-page.html
+grep -o 'image-generator/?v=[^"\\]*' /tmp/custom-page.html | head
+curl -k -sS --max-time 15 https://api.peterai.cc.cd/image-generator/ -o /tmp/image-generator-index.html
+grep -n 'main.js' /tmp/image-generator-index.html
+
+# 4. 公网 main.js 语法
+curl -k -sS --max-time 15 'https://api.peterai.cc.cd/image-generator/main.js?v=<当前版本号>' -o /tmp/image-generator-main.js
+node -c /tmp/image-generator-main.js
+
+# 5. 图片价格
+sg docker -c 'docker compose -f /home/aihub/Peter_ws/sub2api/deploy/docker-compose.yml --env-file /home/aihub/Peter_ws/sub2api/deploy/.env exec -T postgres sh -lc '\''psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -P pager=off -Atc "select min(image_price_1k), max(image_price_1k), min(image_price_2k), max(image_price_2k), min(image_price_4k), max(image_price_4k) from groups;"'\'''
+```
+
+如果要进一步增强源码级验证，可以在 CI 中跑更完整的 `go test ./...`、`pnpm vitest`、`pnpm build`。本机默认使用 Docker 测试脚本和运行态验收。
+
 ## 七、更新记录
+
+### 2026-06-30
+
+- 基于真实代码和运行态完成维护文档优化：
+  - 记录当前 `custom/gallery` 与 `origin/custom/gallery` 的分叉状态：本地 `ahead 83, behind 7`，本地 HEAD 为 `135c1537`。
+  - 明确 `origin/custom/gallery` 不是当前生产代码的可靠灾备来源，新增 Git bundle 灾备流程。
+  - 明确生产运行态由 `deploy/.env`、Compose、Docker volume、数据库设置共同决定。
+  - 标出 `GATEWAY_IMAGE_STREAM_DATA_INTERVAL_TIMEOUT` 生产依赖 `.env` 覆盖为 `90`，不要只看 Compose 默认 `900`。
+  - 明确 PeterAI 画图页不是 Vue build 产物，真实源文件在仓库外 `/home/aihub/Peter_ws/image-generator-index.html` 和 `/home/aihub/Peter_ws/image-generator-main.js`。
+  - 补充画图页源文件备份、容器覆盖、sha256 对比和公网验证流程。
+  - 补充图片画廊、GPT-5.5 默认模型、自定义菜单、同源静态覆盖的真实代码路径。
+  - 标注当前宿主机缺少 `go` 和 `pnpm`，并新增 Docker 测试脚本 `deploy/test-with-docker.sh`。
+  - 新增画图页静态发布脚本 `deploy/publish-image-generator.sh` 和生产验证脚本 `deploy/verify-production.sh`。
+- 实际落地：
+  - 已创建 Git bundle 灾备：`/home/aihub/Peter_ws/migration/sub2api-git-20260630-123303.bundle`
+  - 已把 PeterAI 画图页静态文件纳入仓库：`deploy/static/image-generator/`
+  - 已运行 `deploy/publish-image-generator.sh`，仓库静态文件与容器 volume 文件 hash 一致。
+  - 已运行 `deploy/test-with-docker.sh backend`：`ok github.com/Wei-Shaw/sub2api/internal/service`
+  - 已运行 `deploy/test-with-docker.sh frontend`：3 个测试文件、13 个测试通过。
+- 运行态检查结果：
+  - 当前运行镜像：`sub2api-custom:20260628`
+  - 本机健康检查：`http://127.0.0.1:18080/health -> {"status":"ok"}`
+  - 公网健康检查：`https://api.peterai.cc.cd/health -> {"status":"ok"}`
+  - 当前画图页版本：`image-timeout-motion-20260627`
+  - 公网 `main.js` 语法检查通过，`single_dollar_forEach = 0`
+  - 图片价格仍为每张 `0.1`：所有用户组 `1K / 2K / 4K` 最小值和最大值均为 `0.10000000`
 
 ### 2026-06-28
 
