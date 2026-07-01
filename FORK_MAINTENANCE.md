@@ -1382,6 +1382,23 @@ sg docker -c 'docker compose -f /home/aihub/Peter_ws/sub2api/deploy/docker-compo
 
 ### 2026-07-02
 
+- 已构建并部署本次上游同步后的生产镜像：
+  - 当前运行镜像：`sub2api-custom:20260702-v0142-easypay`。
+  - 镜像 ID：`sha256:f7691394d8eb57d3e115ff0c92ea6170a84afdebda6a08b5bd163c2701b771f1`。
+  - 构建提交：`58c79fc8ebbe`。
+  - 仅重建应用容器 `sub2api`，Postgres / Redis 未重建。
+- 发布前本地备份成功：
+  - `/home/aihub/Peter_ws/sub2api-backups/20260702_010049`
+  - Postgres dump：`79M`
+  - App data tar.gz：`32M`
+- 生产验证：
+  - 本机健康检查：`http://127.0.0.1:18080/health -> {"status":"ok"}`。
+  - 公网健康检查：`https://api.peterai.cc.cd/health -> {"status":"ok"}`。
+  - `deploy/verify-production.sh` 通过。
+  - 当前画图页版本：`repeat-fix-20260630`。
+  - 公网 `main.js` 语法检查通过，`single_dollar_forEach = 0`。
+  - 图片价格仍为每张 `0.1`：所有用户组 `1K / 2K / 4K` 最小值和最大值均为 `0.10000000`。
+  - 仓库 `deploy/static/image-generator/` 与容器 `/app/data/public/image-generator/` hash 一致。
 - 按本手册流程从 `upstream/main` 合并官方最新源码到 `custom/gallery`：
   - 上游 tag：`v0.1.142`。
   - 上游 HEAD：`7dc7cfce`。
