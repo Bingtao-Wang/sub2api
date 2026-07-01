@@ -907,15 +907,6 @@ func (s *OpenAIGatewayService) writeOpenAIImagesNonStreamingResponse(resp *http.
 	c.Data(resp.StatusCode, contentType, body)
 }
 
-func (s *OpenAIGatewayService) handleOpenAIImagesNonStreamingResponse(resp *http.Response, c *gin.Context) (OpenAIUsage, int, []string, error) {
-	body, usage, imageCount, imageSizes, err := s.readOpenAIImagesNonStreamingResponse(resp, c)
-	if err != nil {
-		return OpenAIUsage{}, 0, nil, err
-	}
-	s.writeOpenAIImagesNonStreamingResponse(resp, c, body)
-	return usage, imageCount, imageSizes, nil
-}
-
 func (s *OpenAIGatewayService) handleOpenAIImagesStreamingResponse(
 	resp *http.Response,
 	c *gin.Context,
