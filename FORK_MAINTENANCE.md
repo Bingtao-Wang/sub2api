@@ -133,18 +133,18 @@ git branch custom/gallery-backup-$(date +%Y%m%d) custom/gallery
 
 ### 1.4 当前远端差异与灾备优先级
 
-2026-06-30 上线后检查结果：
+2026-07-02 源码更新检查结果：
 
 ```text
 当前分支：custom/gallery
-本地 HEAD：57a1735d
-upstream/main：89b2d63e
-upstream tag：v0.1.140
-origin/custom/gallery：57a1735d
-状态：custom/gallery...origin/custom/gallery，无 ahead/behind
+上游最新：upstream/main 7dc7cfce
+上游 tag：v0.1.142（tag 提交 60da9ba1，upstream/main 另含 VERSION 同步提交 7dc7cfce）
+本次合并提交：d3b61593 Merge upstream v0.1.142 into custom gallery
+本地备份分支：custom/gallery-backup-20260702-005327
+状态：本地 custom/gallery 已合并 upstream/main，尚未推送 origin/custom/gallery
 ```
 
-这表示当前 `custom/gallery` 已合并官方 `v0.1.140`，并已推送到 GitHub fork。当前 `origin/custom/gallery` 可作为远端 Git 灾备来源，但生产恢复仍必须同时依赖数据库 dump、Docker volume 备份和 `deploy/.env`。
+这表示当前 `custom/gallery` 已合并官方 `v0.1.142` 源码，并保留本 fork 的 GPT-5.5 默认模型、图片画廊、PeterAI 画图页、同站静态页覆盖、多级代理层级、顶栏问候和易支付增强。推送前 `origin/custom/gallery` 仍停留在旧提交；生产恢复必须同时依赖数据库 dump、Docker volume 备份和 `deploy/.env`，不能只依赖 Git。
 
 已创建离线灾备：
 
@@ -881,6 +881,19 @@ https://www.ezfpy.cn/
 - 支付结果页地址不要带空格。
 - 示例正确地址：`https://api.peterai.cc.cd/payment/result`
 - 如果支付宝桌面端二维码未生成，优先调整易支付通道配置、跳转模式和浏览器拦截设置。
+- 2026-07-02 新增可选 `queryUrl` 配置，用于易支付站点查单接口不是传统 `/api.php` 的情况，例如 `https://www.ezfpy.cn/api/findorder`。
+- 易支付查单优先尝试配置的 `queryUrl`；`findorder` 接口会先按商户订单号 `type=2` 查询，再按系统订单号 `type=1` 兜底；之后再回退传统 `/api.php`。
+- 后台支付配置页已增加“订单查询地址”字段，中英文文案均已补齐。
+
+相关代码：
+
+```text
+backend/internal/payment/provider/easypay.go
+backend/internal/payment/provider/easypay_query_test.go
+frontend/src/components/payment/providerConfig.ts
+frontend/src/i18n/locales/zh.ts
+frontend/src/i18n/locales/en.ts
+```
 
 ### 4.6 多级代理层级与代理账户授权
 
@@ -1366,6 +1379,32 @@ sg docker -c 'docker compose -f /home/aihub/Peter_ws/sub2api/deploy/docker-compo
 如果要进一步增强源码级验证，可以在 CI 中跑更完整的 `go test ./...`、`pnpm vitest`、`pnpm build`。本机默认使用 Docker 测试脚本和运行态验收。
 
 ## 七、更新记录
+
+### 2026-07-02
+
+- 按本手册流程从 `upstream/main` 合并官方最新源码到 `custom/gallery`：
+  - 上游 tag：`v0.1.142`。
+  - 上游 HEAD：`7dc7cfce`。
+  - 本次合并提交：`d3b61593 Merge upstream v0.1.142 into custom gallery`。
+  - 合并前已创建备份分支：`custom/gallery-backup-20260702-005327`。
+- 冲突处理：
+  - `backend/internal/service/openai_codex_transform.go`：保留上游新增的 `gpt-5.5-pro` / encrypted reasoning 相关修复，同时保留本 fork 的 GPT-5.5 默认映射和 Spark 模型映射。
+- 已确认保留的 fork 自定义能力：
+  - GPT-5.5 默认模型。
+  - 图片画廊。
+  - PeterAI 画图页与静态发布脚本。
+  - 同站相对 URL / 静态页覆盖。
+  - 多级代理层级与代理账户授权。
+  - 顶栏用户关怀问候。
+  - 图片失败不扣费与 Images failover 修复。
+- 新增并保留易支付查单增强：
+  - 支持可选 `queryUrl`。
+  - 支持新版易支付 `/api/findorder` 返回结构和 `code=200`。
+  - 查不到订单时自动回退系统订单号和传统 `/api.php`。
+  - 后台支付配置页新增“订单查询地址”字段和中英文提示。
+- 当前注意：
+  - 合并和源码改动已在本地完成，尚未推送到 `origin/custom/gallery`。
+  - 宿主机仍缺少本地 `gofmt`，源码验证优先使用 Docker 测试脚本或容器内 Go 工具链。
 
 ### 2026-06-30
 

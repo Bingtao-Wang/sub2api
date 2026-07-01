@@ -103,6 +103,8 @@ func TestEasyPayQueryOrderStatusMapping(t *testing.T) {
 			defer server.Close()
 
 			provider := newTestEasyPay(t, server.URL)
+			provider.config["queryUrl"] = server.URL + "/api.php"
+			provider.config["apiBase"] = ""
 			resp, err := provider.QueryOrder(context.Background(), orderID)
 			if err != nil {
 				t.Fatalf("QueryOrder returned error: %v", err)
@@ -127,5 +129,91 @@ func TestEasyPayQueryOrderStatusMapping(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestEasyPayQueryOrderSupportsFindOrderEndpoint(t *testing.T) {
+	t.Parallel()
+
+	const orderID = "order-456"
+	var gotPath string
+	var gotForm url.Values
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		if err := r.ParseForm(); err != nil {
+			t.Errorf("ParseForm: %v", err)
+		}
+		gotForm = r.PostForm
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"code":200,"msg":"获取成功!","data":{"type":"wxpay","trade_no":"gateway-456","out_trade_no":"order-456","money":"100.00","status":1}}`))
+	}))
+	defer server.Close()
+
+	provider := newTestEasyPay(t, server.URL)
+	provider.config["queryUrl"] = server.URL + "/api/findorder"
+	resp, err := provider.QueryOrder(context.Background(), orderID)
+	if err != nil {
+		t.Fatalf("QueryOrder returned error: %v", err)
+	}
+	if gotPath != "/api/findorder" {
+		t.Fatalf("path = %q, want /api/findorder", gotPath)
+	}
+	for key, want := range map[string]string{
+		"order_no": orderID,
+		"type":     "2",
+	} {
+		if got := gotForm.Get(key); got != want {
+			t.Fatalf("form[%s] = %q, want %q (form=%v)", key, got, want, gotForm)
+		}
+	}
+	if resp.Status != payment.ProviderStatusPaid {
+		t.Fatalf("status = %q, want paid", resp.Status)
+	}
+	if resp.TradeNo != "gateway-456" {
+		t.Fatalf("trade_no = %q, want gateway-456", resp.TradeNo)
+	}
+	if resp.Amount != 100 {
+		t.Fatalf("amount = %v, want 100", resp.Amount)
+	}
+}
+
+func TestEasyPayQueryOrderFallsBackFromMissingFindOrderToLegacyAPI(t *testing.T) {
+	t.Parallel()
+
+	const orderID = "order-789"
+	var gotPaths []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPaths = append(gotPaths, r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/findorder":
+			_, _ = w.Write([]byte(`{"code":201,"msg":"此订单号不是有效订单号"}`))
+		case "/api.php":
+			_, _ = w.Write([]byte(`{"code":1,"status":1,"money":"8.88","trade_no":"legacy-789"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	provider := newTestEasyPay(t, server.URL)
+	resp, err := provider.QueryOrder(context.Background(), orderID)
+	if err != nil {
+		t.Fatalf("QueryOrder returned error: %v", err)
+	}
+	wantPaths := []string{"/api/findorder", "/api/findorder", "/api.php"}
+	if len(gotPaths) != len(wantPaths) {
+		t.Fatalf("paths = %v, want %v", gotPaths, wantPaths)
+	}
+	for i, want := range wantPaths {
+		if gotPaths[i] != want {
+			t.Fatalf("paths = %v, want %v", gotPaths, wantPaths)
+		}
+	}
+	if resp.Status != payment.ProviderStatusPaid {
+		t.Fatalf("status = %q, want paid", resp.Status)
+	}
+	if resp.TradeNo != "legacy-789" {
+		t.Fatalf("trade_no = %q, want legacy-789", resp.TradeNo)
 	}
 }

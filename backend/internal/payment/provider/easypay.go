@@ -22,6 +22,7 @@ import (
 // EasyPay constants.
 const (
 	easypayCodeSuccess     = 1
+	easypayFindOrderOKCode = 200
 	easypayStatusPaid      = 1
 	easypayHTTPTimeout     = 10 * time.Second
 	maxEasypayResponseSize = 1 << 20 // 1MB
@@ -40,7 +41,7 @@ type EasyPay struct {
 }
 
 // NewEasyPay creates a new EasyPay provider.
-// config keys: pid, pkey, apiBase, notifyUrl, returnUrl, cid, cidAlipay, cidWxpay
+// config keys: pid, pkey, apiBase, notifyUrl, returnUrl, cid, cidAlipay, cidWxpay, queryUrl
 func NewEasyPay(instanceID string, config map[string]string) (*EasyPay, error) {
 	for _, k := range []string{"pid", "pkey", "apiBase", "notifyUrl", "returnUrl"} {
 		if strings.TrimSpace(config[k]) == "" {
@@ -205,31 +206,144 @@ func (e *EasyPay) resolveURLs(req payment.CreatePaymentRequest) (string, string)
 }
 
 func (e *EasyPay) QueryOrder(ctx context.Context, tradeNo string) (*payment.QueryOrderResponse, error) {
-	params := map[string]string{
-		"act": "order", "pid": e.config["pid"],
-		"key": e.config["pkey"], "out_trade_no": tradeNo,
+	tradeNo = strings.TrimSpace(tradeNo)
+	if tradeNo == "" {
+		return nil, fmt.Errorf("easypay query missing order identifier")
 	}
-	body, err := e.post(ctx, e.apiBase()+"/api.php", params)
-	if err != nil {
-		return nil, fmt.Errorf("easypay query: %w", err)
+
+	attempts := e.queryOrderAttempts(tradeNo)
+	var firstErr error
+	var lastPending *payment.QueryOrderResponse
+	for _, attempt := range attempts {
+		body, httpStatus, err := e.postRaw(ctx, attempt.endpoint, attempt.params)
+		if err != nil {
+			if firstErr == nil {
+				firstErr = fmt.Errorf("%s: %w", attempt.name, err)
+			}
+			continue
+		}
+		resp, fallback, err := e.parseQueryOrderResponse(tradeNo, httpStatus, body)
+		if err != nil {
+			if firstErr == nil {
+				firstErr = fmt.Errorf("%s: %w", attempt.name, err)
+			}
+			continue
+		}
+		if resp.Status == payment.ProviderStatusPaid || !fallback {
+			return resp, nil
+		}
+		lastPending = resp
 	}
-	type easyPayQueryData struct {
-		TradeStatus *string `json:"trade_status"`
-		Status      *int    `json:"status"`
-		Money       *string `json:"money"`
-		TradeNo     *string `json:"trade_no"`
+	if lastPending != nil {
+		return lastPending, nil
 	}
-	var resp struct {
-		Code        int              `json:"code"`
-		Msg         string           `json:"msg"`
-		TradeStatus *string          `json:"trade_status"`
-		Status      *int             `json:"status"`
-		Money       *string          `json:"money"`
-		TradeNo     *string          `json:"trade_no"`
-		Data        easyPayQueryData `json:"data"`
+	if firstErr != nil {
+		return nil, fmt.Errorf("easypay query: %w", firstErr)
 	}
+	return nil, fmt.Errorf("easypay query has no endpoints")
+}
+
+type easyPayQueryAttempt struct {
+	name     string
+	endpoint string
+	params   map[string]string
+}
+
+func (e *EasyPay) queryOrderAttempts(orderNo string) []easyPayQueryAttempt {
+	base := e.apiBase()
+	var attempts []easyPayQueryAttempt
+	add := func(name, endpoint string, params map[string]string) {
+		endpoint = strings.TrimSpace(endpoint)
+		if endpoint == "" {
+			return
+		}
+		for _, attempt := range attempts {
+			if attempt.endpoint == endpoint && mapsEqual(attempt.params, params) {
+				return
+			}
+		}
+		attempts = append(attempts, easyPayQueryAttempt{name: name, endpoint: endpoint, params: params})
+	}
+
+	if queryURL := strings.TrimSpace(e.config["queryUrl"]); queryURL != "" {
+		addEasyPayQueryEndpoint(add, "configured queryUrl", queryURL, orderNo, e.config)
+	}
+	if base != "" {
+		addEasyPayQueryEndpoint(add, "findorder merchant order", base+"/api/findorder", orderNo, e.config)
+		add("legacy api.php", base+"/api.php", legacyEasyPayQueryParams(orderNo, e.config))
+	}
+	return attempts
+}
+
+func addEasyPayQueryEndpoint(add func(string, string, map[string]string), name, endpoint, orderNo string, config map[string]string) {
+	lower := strings.ToLower(strings.TrimSpace(endpoint))
+	if strings.Contains(lower, "findorder") {
+		// The /api/findorder endpoint used by newer EasyPay deployments expects
+		// type=2 for merchant out_trade_no, despite some docs describing the
+		// values in the opposite order.
+		add(name, endpoint, map[string]string{"order_no": orderNo, "type": "2"})
+		add(name+" system order fallback", endpoint, map[string]string{"order_no": orderNo, "type": "1"})
+		return
+	}
+	add(name, endpoint, legacyEasyPayQueryParams(orderNo, config))
+}
+
+func legacyEasyPayQueryParams(orderNo string, config map[string]string) map[string]string {
+	return map[string]string{
+		"act": "order", "pid": config["pid"],
+		"key": config["pkey"], "out_trade_no": orderNo,
+	}
+}
+
+func mapsEqual(a, b map[string]string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k, av := range a {
+		if b[k] != av {
+			return false
+		}
+	}
+	return true
+}
+
+type easyPayQueryData struct {
+	TradeStatus *string `json:"trade_status"`
+	Status      *int    `json:"status"`
+	Money       *string `json:"money"`
+	TradeNo     *string `json:"trade_no"`
+	OutTradeNo  *string `json:"out_trade_no"`
+}
+
+type easyPayQueryResponsePayload struct {
+	Code        int              `json:"code"`
+	Msg         string           `json:"msg"`
+	TradeStatus *string          `json:"trade_status"`
+	Status      *int             `json:"status"`
+	Money       *string          `json:"money"`
+	TradeNo     *string          `json:"trade_no"`
+	OutTradeNo  *string          `json:"out_trade_no"`
+	Data        easyPayQueryData `json:"data"`
+}
+
+func (e *EasyPay) parseQueryOrderResponse(orderNo string, httpStatus int, body []byte) (*payment.QueryOrderResponse, bool, error) {
+	if httpStatus < http.StatusOK || httpStatus >= http.StatusMultipleChoices {
+		return nil, true, fmt.Errorf("HTTP %d: %s", httpStatus, summarizeEasyPayResponse(body))
+	}
+
+	trimmed := strings.TrimSpace(string(body))
+	if trimmed == "" {
+		return nil, true, fmt.Errorf("empty response")
+	}
+	lower := strings.ToLower(trimmed)
+	if strings.HasPrefix(lower, "<!doctype html") || strings.HasPrefix(lower, "<html") ||
+		(strings.HasPrefix(lower, "<") && strings.Contains(lower, "html")) {
+		return nil, true, fmt.Errorf("non-JSON response: %s", summarizeEasyPayResponse(body))
+	}
+
+	var resp easyPayQueryResponsePayload
 	if err := json.Unmarshal(body, &resp); err != nil {
-		return nil, fmt.Errorf("easypay parse query: %w", err)
+		return nil, true, fmt.Errorf("parse query: %w", err)
 	}
 	status := payment.ProviderStatusPending
 	if resp.TradeStatus != nil {
@@ -254,7 +368,7 @@ func (e *EasyPay) QueryOrder(ctx context.Context, tradeNo string) (*payment.Quer
 	} else if resp.Data.Money != nil {
 		money = *resp.Data.Money
 	}
-	responseTradeNo := tradeNo
+	responseTradeNo := orderNo
 	if resp.TradeNo != nil {
 		if *resp.TradeNo != "" {
 			responseTradeNo = *resp.TradeNo
@@ -264,12 +378,19 @@ func (e *EasyPay) QueryOrder(ctx context.Context, tradeNo string) (*payment.Quer
 	}
 
 	amount, _ := strconv.ParseFloat(money, 64)
+	fallback := resp.Code != easypayCodeSuccess && resp.Code != easypayFindOrderOKCode && !easyPayQueryHasOrderData(resp)
 	return &payment.QueryOrderResponse{
 		TradeNo:  responseTradeNo,
 		Status:   status,
 		Amount:   amount,
 		Metadata: e.MerchantIdentityMetadata(),
-	}, nil
+	}, fallback, nil
+}
+
+func easyPayQueryHasOrderData(resp easyPayQueryResponsePayload) bool {
+	return resp.TradeStatus != nil || resp.Status != nil || resp.Money != nil || resp.TradeNo != nil ||
+		resp.OutTradeNo != nil || resp.Data.TradeStatus != nil || resp.Data.Status != nil ||
+		resp.Data.Money != nil || resp.Data.TradeNo != nil || resp.Data.OutTradeNo != nil
 }
 
 func (e *EasyPay) VerifyNotification(_ context.Context, rawBody string, _ map[string]string) (*payment.PaymentNotification, error) {
