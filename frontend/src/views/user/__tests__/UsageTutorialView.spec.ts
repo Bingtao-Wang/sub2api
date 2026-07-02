@@ -82,6 +82,7 @@ function mountView() {
       stubs: {
         AppLayout: { template: '<main><slot /></main>' },
         Icon: { template: '<span />' },
+        PlatformIcon: { template: '<span />' },
         RouterLink: { template: '<a><slot /></a>' },
       },
     },
@@ -141,6 +142,9 @@ describe('UsageTutorialView', () => {
     expect(wrapper.text()).toContain('node -v')
     expect(wrapper.text()).toContain('npm -v')
     expect(wrapper.text()).toContain('npm install -g @openai/codex')
+    expect(wrapper.text()).toContain('tutorial.clientDescriptions.codex')
+    expect(wrapper.text()).toContain('tutorial.summary.title')
+    expect(wrapper.text()).not.toContain('tutorial.channel')
     expect(wrapper.text()).toContain('base_url = "https://default.example.com/v1"')
     expect(wrapper.text()).toContain('"OPENAI_API_KEY": "sk-openai"')
     expect(wrapper.text()).not.toContain('sk-gemini')
@@ -182,12 +186,20 @@ describe('UsageTutorialView', () => {
     expect(maxButton).toBeDefined()
     await maxButton!.trigger('click')
 
-    expect(wrapper.text()).toContain('npm install -g @anthropic-ai/claude-code')
+    expect(wrapper.text()).toContain('npm install -g @anthropic-ai/claude-code@latest')
     expect(wrapper.text()).toContain('claude --version')
+    expect(wrapper.text()).toContain('code --install-extension anthropic.claude-code')
+    expect(wrapper.text()).toContain('tutorial.optionalVsCodeTitle')
+    expect(wrapper.text()).toContain('tutorial.optionalIntegration')
+    expect(wrapper.text()).not.toContain('tutorial.steps.useClaudeInVsCode')
     expect(wrapper.text()).toContain('notepad C:\\Users\\<用户名>\\.claude\\settings.json')
     expect(wrapper.text()).toContain('"ANTHROPIC_BASE_URL": "https://default.example.com"')
     expect(wrapper.text()).toContain('"ANTHROPIC_AUTH_TOKEN": "sk-claude"')
     expect(wrapper.text()).toContain('"ANTHROPIC_MODEL": "claude-opus-4-8"')
+    expect(wrapper.text()).toContain('"ANTHROPIC_DEFAULT_FABLE_MODEL": "claude-fable-5[1M]"')
+    expect(wrapper.text()).toContain('"ANTHROPIC_DEFAULT_SONNET_MODEL": "claude-sonnet-5"')
+    expect(wrapper.text()).toContain('"ANTHROPIC_DEFAULT_OPUS_MODEL": "claude-opus-4-8"')
+    expect(wrapper.text()).toContain('"ENABLE_TOOL_SEARCH": "true"')
     expect(wrapper.text()).not.toContain('"OPENAI_API_KEY": "sk-openai"')
 
     const overseasButton = wrapper.findAll('button').find((button) => button.text().includes('Claude Overseas'))

@@ -3,62 +3,59 @@
     <div class="tutorial-shell">
       <section class="tutorial-main">
         <div class="tutorial-toolbar">
-          <div class="tutorial-row">
-            <span class="tutorial-label">{{ t('tutorial.channel') }}</span>
+          <div class="tutorial-client-grid" :aria-label="t('tutorial.client')">
             <button
               v-for="option in tutorialOptions"
               :key="option.id"
               type="button"
-              class="tutorial-pill"
-              :class="{ 'tutorial-pill-active': selectedClient === option.id }"
+              class="tutorial-client-card"
+              :class="[
+                `tutorial-client-${option.id}`,
+                { 'tutorial-client-active': selectedClient === option.id },
+              ]"
               @click="selectedClient = option.id"
             >
-              {{ option.channelLabel }}
+              <span class="tutorial-client-logo">
+                <PlatformIcon :platform="option.platform" size="lg" />
+              </span>
+              <span class="tutorial-client-copy">
+                <span class="tutorial-client-kicker">{{ option.channelLabel }}</span>
+                <span class="tutorial-client-name">{{ option.clientLabel }}</span>
+                <span class="tutorial-client-description">{{ option.description }}</span>
+              </span>
             </button>
           </div>
 
-          <div class="tutorial-row">
-            <span class="tutorial-label">{{ t('tutorial.model') }}</span>
-            <select v-model="selectedModel" class="tutorial-select">
-              <option v-for="model in modelOptions" :key="model" :value="model">
-                {{ model }}
-              </option>
-            </select>
+          <div class="tutorial-controls">
+            <label class="tutorial-field">
+              <span class="tutorial-label">{{ t('tutorial.model') }}</span>
+              <select v-model="selectedModel" class="tutorial-select">
+                <option v-for="model in modelOptions" :key="model" :value="model">
+                  {{ model }}
+                </option>
+              </select>
+            </label>
+
+            <label class="tutorial-field tutorial-field-wide">
+              <span class="tutorial-label">{{ t('tutorial.apiKey') }}</span>
+              <select v-model.number="selectedKeyId" class="tutorial-select tutorial-key-select">
+                <option v-if="availableKeys.length === 0" :value="0">
+                  {{ noAvailableKeyText }}
+                </option>
+                <option v-for="key in availableKeys" :key="key.id" :value="key.id">
+                  {{ key.name }} · {{ maskApiKey(key.key) }}
+                </option>
+              </select>
+            </label>
           </div>
 
-          <div class="tutorial-row">
-            <span class="tutorial-label">{{ t('tutorial.client') }}</span>
-            <button
-              v-for="option in tutorialOptions"
-              :key="option.id"
-              type="button"
-              class="tutorial-pill"
-              :class="{ 'tutorial-pill-active': selectedClient === option.id }"
-              @click="selectedClient = option.id"
-            >
-              <Icon name="terminal" size="sm" />
-              {{ option.clientLabel }}
-            </button>
-          </div>
-
-          <div class="tutorial-row">
-            <span class="tutorial-label">{{ t('tutorial.apiKey') }}</span>
-            <select v-model.number="selectedKeyId" class="tutorial-select tutorial-key-select">
-              <option v-if="availableKeys.length === 0" :value="0">
-                {{ noAvailableKeyText }}
-              </option>
-              <option v-for="key in availableKeys" :key="key.id" :value="key.id">
-                {{ key.name }} · {{ maskApiKey(key.key) }}
-              </option>
-            </select>
-          </div>
-
-          <div class="tutorial-mobile-endpoints">
+          <div class="tutorial-mobile-sidebar">
             <EndpointSelector
               :endpoints="endpointOptions"
               :selected-id="selectedEndpointId"
               @select="selectedEndpointId = $event"
             />
+            <ConfigSummary :items="summaryItems" />
           </div>
         </div>
 
@@ -126,15 +123,38 @@
           <TutorialStep :index="6" :title="startStepTitle">
             <CodeBlock path="Terminal" :content="startCommand" />
           </TutorialStep>
+
+          <section v-if="selectedClient === 'claude'" class="tutorial-vscode-card">
+            <div class="tutorial-vscode-header">
+              <span class="tutorial-vscode-logo">VS</span>
+              <div>
+                <p class="tutorial-vscode-kicker">{{ t('tutorial.optionalIntegration') }}</p>
+                <h2>{{ t('tutorial.optionalVsCodeTitle') }}</h2>
+              </div>
+            </div>
+            <p class="tutorial-step-note">{{ t('tutorial.vscodeClaudeHint') }}</p>
+            <div class="tutorial-vscode-guide">
+              <div
+                v-for="item in vscodeClaudeGuides"
+                :key="item.title"
+                class="tutorial-vscode-guide-item"
+              >
+                <Icon :name="item.icon" size="sm" />
+                <span>{{ item.title }}</span>
+              </div>
+            </div>
+            <CodeBlock :path="vscodeClaudeCommand.path" :content="vscodeClaudeCommand.content" />
+          </section>
         </div>
       </section>
 
-      <aside class="tutorial-endpoints">
+      <aside class="tutorial-sidebar">
         <EndpointSelector
           :endpoints="endpointOptions"
           :selected-id="selectedEndpointId"
           @select="selectedEndpointId = $event"
         />
+        <ConfigSummary :items="summaryItems" />
       </aside>
     </div>
   </AppLayout>
@@ -145,6 +165,7 @@ import { computed, defineComponent, h, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import Icon from '@/components/icons/Icon.vue'
+import PlatformIcon from '@/components/common/PlatformIcon.vue'
 import { keysAPI } from '@/api/keys'
 import { useAppStore } from '@/stores'
 import { useClipboard } from '@/composables/useClipboard'
@@ -163,6 +184,16 @@ interface TutorialCommand {
   path: string
   content: string
   hint?: string
+}
+
+interface SummaryItem {
+  label: string
+  value: string
+}
+
+interface VsCodeGuide {
+  title: string
+  icon: 'download' | 'document' | 'terminal'
 }
 
 type TutorialClient = 'codex' | 'claude'
@@ -187,15 +218,23 @@ const claudeModelOptions = ['claude-opus-4-8', 'claude-opus-4-7', 'claude-sonnet
 const tutorialOptions = computed(() => [
   {
     id: 'codex' as const,
+    platform: 'openai' as const,
     channelLabel: t('tutorial.openaiOfficial'),
     clientLabel: 'Codex',
+    description: t('tutorial.clientDescriptions.codex'),
   },
   {
     id: 'claude' as const,
+    platform: 'anthropic' as const,
     channelLabel: t('tutorial.maxOfficial'),
     clientLabel: 'Claude Code',
+    description: t('tutorial.clientDescriptions.claude'),
   },
 ])
+
+const selectedTutorialOption = computed(() =>
+  tutorialOptions.value.find((option) => option.id === selectedClient.value) ?? tutorialOptions.value[0]
+)
 
 const modelOptions = computed(() =>
   selectedClient.value === 'claude' ? claudeModelOptions : codexModelOptions
@@ -303,6 +342,29 @@ const configFiles = computed<ClientConfigFile[]>(() => {
   })
 })
 
+const summaryItems = computed<SummaryItem[]>(() => [
+  {
+    label: t('tutorial.summary.client'),
+    value: `${selectedTutorialOption.value.channelLabel} · ${selectedTutorialOption.value.clientLabel}`,
+  },
+  {
+    label: t('tutorial.summary.model'),
+    value: selectedModel.value,
+  },
+  {
+    label: t('tutorial.summary.apiKey'),
+    value: selectedKey.value ? `${selectedKey.value.name} · ${maskApiKey(selectedKey.value.key)}` : noAvailableKeyText.value,
+  },
+  {
+    label: t('tutorial.summary.endpoint'),
+    value: selectedBaseUrl.value,
+  },
+  {
+    label: t('tutorial.summary.configPath'),
+    value: configFiles.value.map((file) => file.path).join(' / ') || '-',
+  },
+])
+
 const directoryCommand = computed(() => selectedOs.value === 'windows'
   ? { path: 'Command Prompt', content: `mkdir C:\\Users\\<用户名>\\${selectedClient.value === 'claude' ? '.claude' : '.codex'}` }
   : { path: 'Terminal', content: `mkdir -p ~/${selectedClient.value === 'claude' ? '.claude' : '.codex'}` }
@@ -324,7 +386,7 @@ const openConfigCommand = computed(() => selectedOs.value === 'windows'
 )
 
 const installStepTitle = computed(() =>
-  selectedClient.value === 'claude' ? t('tutorial.steps.installClaude') : t('tutorial.steps.installCodex')
+  selectedClient.value === 'claude' ? t('tutorial.steps.installOrUpdateClaude') : t('tutorial.steps.installCodex')
 )
 
 const verifyStepTitle = computed(() =>
@@ -344,7 +406,7 @@ const startStepTitle = computed(() =>
 )
 
 const installCommand = computed(() =>
-  selectedClient.value === 'claude' ? 'npm install -g @anthropic-ai/claude-code' : 'npm install -g @openai/codex'
+  selectedClient.value === 'claude' ? 'npm install -g @anthropic-ai/claude-code@latest' : 'npm install -g @openai/codex'
 )
 
 const verifyCommand = computed(() =>
@@ -354,6 +416,23 @@ const verifyCommand = computed(() =>
 const startCommand = computed(() =>
   selectedClient.value === 'claude' ? 'claude' : 'codex'
 )
+
+const vscodeClaudeCommand = computed<TutorialCommand>(() => selectedOs.value === 'windows'
+  ? {
+      path: 'PowerShell',
+      content: 'code --install-extension anthropic.claude-code\ncode .',
+    }
+  : {
+      path: 'Terminal',
+      content: 'code --install-extension anthropic.claude-code\ncode .',
+    }
+)
+
+const vscodeClaudeGuides = computed<VsCodeGuide[]>(() => [
+  { title: t('tutorial.vscodeGuide.installExtension'), icon: 'download' },
+  { title: t('tutorial.vscodeGuide.openProject'), icon: 'document' },
+  { title: t('tutorial.vscodeGuide.startClaude'), icon: 'terminal' },
+])
 
 watch(selectedClient, () => {
   selectedModel.value = modelOptions.value[0]
@@ -452,6 +531,24 @@ const CodeBlock = defineComponent({
   },
 })
 
+const ConfigSummary = defineComponent({
+  name: 'TutorialConfigSummary',
+  props: {
+    items: { type: Array as () => SummaryItem[], required: true },
+  },
+  setup(props) {
+    return () => h('div', { class: 'tutorial-summary-card' }, [
+      h('h2', { class: 'tutorial-endpoint-title' }, t('tutorial.summary.title')),
+      h('dl', { class: 'tutorial-summary-list' }, props.items.map((item) =>
+        h('div', { key: item.label, class: 'tutorial-summary-row' }, [
+          h('dt', item.label),
+          h('dd', item.value),
+        ])
+      )),
+    ])
+  },
+})
+
 const EndpointSelector = defineComponent({
   name: 'TutorialEndpointSelector',
   props: {
@@ -501,13 +598,13 @@ onMounted(loadPageData)
 <style>
 .tutorial-shell {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 280px;
-  gap: 0;
+  grid-template-columns: minmax(0, 1fr) 320px;
   min-height: calc(100vh - 64px - 4rem);
   overflow: hidden;
   border: 1px solid theme('colors.gray.200');
-  border-radius: 1rem;
+  border-radius: 0.75rem;
   background: theme('colors.white');
+  box-shadow: theme('boxShadow.card');
 }
 
 .dark .tutorial-shell {
@@ -524,78 +621,148 @@ onMounted(loadPageData)
   position: sticky;
   top: 0;
   z-index: 10;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 1rem 1.5rem;
+  display: grid;
+  gap: 1rem;
   border-bottom: 1px solid theme('colors.gray.200');
-  background: rgba(255, 255, 255, 0.95);
-  padding: 1.25rem 1.5rem;
+  background: rgba(255, 255, 255, 0.96);
+  padding: 1.25rem;
   backdrop-filter: blur(12px);
 }
 
 .dark .tutorial-toolbar {
   border-color: theme('colors.dark.700');
-  background: rgba(17, 24, 39, 0.94);
+  background: rgba(17, 24, 39, 0.95);
 }
 
-.tutorial-row {
-  display: flex;
-  min-width: 0;
-  align-items: center;
+.tutorial-client-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.75rem;
 }
 
-.tutorial-label {
-  flex: 0 0 auto;
-  font-size: 0.875rem;
-  color: theme('colors.gray.500');
-}
-
-.tutorial-pill {
-  display: inline-flex;
+.tutorial-client-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.75rem;
   align-items: center;
-  gap: 0.375rem;
   border: 1px solid theme('colors.gray.200');
-  border-radius: 0.625rem;
-  padding: 0.5rem 0.875rem;
-  font-size: 0.875rem;
-  font-weight: 600;
-  color: theme('colors.gray.600');
+  border-radius: 0.5rem;
   background: theme('colors.white');
+  padding: 0.875rem;
+  text-align: left;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
 }
 
-.tutorial-pill-active {
-  border-color: theme('colors.primary.300');
-  color: theme('colors.primary.700');
+.tutorial-client-card:hover {
+  border-color: theme('colors.gray.300');
+  box-shadow: theme('boxShadow.card');
+}
+
+.tutorial-client-active {
+  border-color: theme('colors.primary.400');
   background: theme('colors.primary.50');
   box-shadow: 0 0 0 1px theme('colors.primary.200');
 }
 
-.dark .tutorial-pill {
-  border-color: theme('colors.dark.600');
-  background: theme('colors.dark.800');
-  color: theme('colors.dark.200');
+.tutorial-client-claude.tutorial-client-active {
+  border-color: theme('colors.amber.400');
+  background: theme('colors.amber.50');
+  box-shadow: 0 0 0 1px theme('colors.amber.200');
 }
 
-.dark .tutorial-pill-active {
+.dark .tutorial-client-card {
+  border-color: theme('colors.dark.700');
+  background: theme('colors.dark.800');
+}
+
+.dark .tutorial-client-active {
   border-color: theme('colors.primary.500');
-  color: theme('colors.primary.300');
   background: rgb(20 184 166 / 0.12);
+}
+
+.dark .tutorial-client-claude.tutorial-client-active {
+  border-color: theme('colors.amber.500');
+  background: rgb(245 158 11 / 0.12);
+}
+
+.tutorial-client-logo {
+  display: grid;
+  height: 2.5rem;
+  width: 2.5rem;
+  place-items: center;
+  border-radius: 0.5rem;
+  background: theme('colors.gray.100');
+  color: theme('colors.gray.900');
+}
+
+.tutorial-client-claude .tutorial-client-logo {
+  background: theme('colors.amber.100');
+  color: theme('colors.amber.700');
+}
+
+.dark .tutorial-client-logo {
+  background: theme('colors.dark.700');
+  color: theme('colors.dark.100');
+}
+
+.dark .tutorial-client-claude .tutorial-client-logo {
+  background: rgb(245 158 11 / 0.18);
+  color: theme('colors.amber.300');
+}
+
+.tutorial-client-copy {
+  display: grid;
+  min-width: 0;
+  gap: 0.125rem;
+}
+
+.tutorial-client-kicker,
+.tutorial-client-description {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.75rem;
+  color: theme('colors.gray.500');
+}
+
+.tutorial-client-name {
+  font-size: 0.9375rem;
+  font-weight: 800;
+  color: theme('colors.gray.900');
+}
+
+.dark .tutorial-client-name {
+  color: theme('colors.white');
+}
+
+.tutorial-controls {
+  display: grid;
+  grid-template-columns: minmax(12rem, 16rem) minmax(16rem, 1fr);
+  gap: 0.875rem;
+}
+
+.tutorial-field {
+  display: grid;
+  min-width: 0;
+  gap: 0.375rem;
+}
+
+.tutorial-label {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: theme('colors.gray.500');
 }
 
 .tutorial-select {
   min-height: 2.5rem;
-  max-width: 15rem;
+  width: 100%;
+  min-width: 0;
   border: 1px solid theme('colors.gray.200');
-  border-radius: 0.625rem;
+  border-radius: 0.5rem;
   background: theme('colors.white');
   padding: 0.5rem 2rem 0.5rem 0.75rem;
   font-size: 0.875rem;
   color: theme('colors.gray.800');
-}
-
-.tutorial-key-select {
-  max-width: 22rem;
 }
 
 .dark .tutorial-select {
@@ -605,42 +772,78 @@ onMounted(loadPageData)
 }
 
 .tutorial-content {
-  max-width: 900px;
-  padding: 1.75rem 1.5rem 3rem;
+  max-width: 940px;
+  padding: 1.5rem 1.5rem 3rem;
 }
 
 .tutorial-step {
-  margin-bottom: 1.5rem;
+  position: relative;
+  display: grid;
+  gap: 0.75rem;
+  padding: 0 0 1.5rem 2.75rem;
+}
+
+.tutorial-step:not(:last-child)::after {
+  position: absolute;
+  left: 1rem;
+  top: 2.25rem;
+  bottom: 0;
+  width: 1px;
+  background: theme('colors.gray.200');
+  content: '';
+}
+
+.dark .tutorial-step:not(:last-child)::after {
+  background: theme('colors.dark.700');
 }
 
 .tutorial-step-title {
   display: flex;
-  gap: 0.5rem;
-  margin-bottom: 0.75rem;
+  min-width: 0;
+  align-items: center;
+  gap: 0.75rem;
   font-size: 0.9375rem;
-  font-weight: 600;
-  color: theme('colors.gray.700');
+  font-weight: 750;
+  color: theme('colors.gray.800');
 }
 
 .dark .tutorial-step-title {
-  color: theme('colors.dark.200');
+  color: theme('colors.dark.100');
 }
 
 .tutorial-step-index {
-  color: theme('colors.gray.500');
+  position: absolute;
+  left: 0;
+  display: grid;
+  height: 2rem;
+  width: 2rem;
+  place-items: center;
+  border: 1px solid theme('colors.primary.200');
+  border-radius: 999px;
+  background: theme('colors.primary.50');
+  color: theme('colors.primary.700');
+  font-size: 0.8125rem;
+  font-weight: 800;
+}
+
+.dark .tutorial-step-index {
+  border-color: theme('colors.primary.700');
+  background: rgb(20 184 166 / 0.12);
+  color: theme('colors.primary.300');
 }
 
 .tutorial-step-note {
-  margin: 0.75rem 0;
+  margin: 0;
   font-size: 0.875rem;
+  line-height: 1.7;
   color: theme('colors.gray.500');
 }
 
 .tutorial-doc-link {
   display: inline-flex;
-  margin-top: 0.875rem;
+  width: fit-content;
   font-size: 0.875rem;
-  font-weight: 600;
+  font-weight: 700;
   color: theme('colors.primary.600');
 }
 
@@ -655,7 +858,7 @@ onMounted(loadPageData)
 }
 
 .tutorial-code-wrap {
-  margin-top: 0.75rem;
+  min-width: 0;
 }
 
 .tutorial-code-hint {
@@ -665,9 +868,10 @@ onMounted(loadPageData)
 }
 
 .tutorial-code {
+  min-width: 0;
   overflow: hidden;
   border: 1px solid theme('colors.gray.200');
-  border-radius: 0.875rem;
+  border-radius: 0.5rem;
   background: theme('colors.gray.50');
 }
 
@@ -682,7 +886,7 @@ onMounted(loadPageData)
   justify-content: space-between;
   gap: 1rem;
   border-bottom: 1px solid theme('colors.gray.200');
-  padding: 0.625rem 0.875rem;
+  padding: 0.625rem 0.75rem;
 }
 
 .dark .tutorial-code-header {
@@ -701,11 +905,11 @@ onMounted(loadPageData)
 
 .tutorial-copy {
   flex: 0 0 auto;
-  border-radius: 0.5rem;
+  border-radius: 0.375rem;
   background: theme('colors.gray.100');
   padding: 0.25rem 0.625rem;
   font-size: 0.75rem;
-  font-weight: 600;
+  font-weight: 700;
   color: theme('colors.gray.600');
 }
 
@@ -731,19 +935,119 @@ onMounted(loadPageData)
   color: theme('colors.dark.100');
 }
 
-.tutorial-endpoints {
-  border-left: 1px solid theme('colors.gray.200');
-  padding: 1.5rem 1rem;
+.tutorial-vscode-card {
+  display: grid;
+  gap: 0.875rem;
+  margin-left: 2.75rem;
+  border: 1px solid theme('colors.sky.200');
+  border-radius: 0.5rem;
+  background: theme('colors.sky.50');
+  padding: 1rem;
 }
 
-.dark .tutorial-endpoints {
+.dark .tutorial-vscode-card {
+  border-color: theme('colors.sky.800');
+  background: rgb(14 165 233 / 0.1);
+}
+
+.tutorial-vscode-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.tutorial-vscode-logo {
+  display: grid;
+  height: 2.25rem;
+  width: 2.25rem;
+  place-items: center;
+  border-radius: 0.5rem;
+  background: #007acc;
+  color: white;
+  font-size: 0.75rem;
+  font-weight: 800;
+}
+
+.tutorial-vscode-kicker {
+  margin: 0 0 0.125rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: theme('colors.sky.700');
+}
+
+.tutorial-vscode-header h2 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 800;
+  color: theme('colors.gray.900');
+}
+
+.dark .tutorial-vscode-kicker {
+  color: theme('colors.sky.300');
+}
+
+.dark .tutorial-vscode-header h2 {
+  color: theme('colors.white');
+}
+
+.tutorial-vscode-guide {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+
+.tutorial-vscode-guide-item {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.5rem;
+  border: 1px solid theme('colors.sky.200');
+  border-radius: 0.5rem;
+  background: rgb(255 255 255 / 0.7);
+  padding: 0.625rem;
+  font-size: 0.8125rem;
+  font-weight: 700;
+  color: theme('colors.gray.700');
+}
+
+.dark .tutorial-vscode-guide-item {
+  border-color: theme('colors.sky.900');
+  background: rgb(15 23 42 / 0.5);
+  color: theme('colors.dark.100');
+}
+
+.tutorial-sidebar {
+  display: grid;
+  align-content: start;
+  gap: 1rem;
+  border-left: 1px solid theme('colors.gray.200');
+  background: theme('colors.gray.50');
+  padding: 1rem;
+}
+
+.dark .tutorial-sidebar {
   border-color: theme('colors.dark.700');
+  background: theme('colors.dark.950');
+}
+
+.tutorial-endpoint-card,
+.tutorial-summary-card {
+  border: 1px solid theme('colors.gray.200');
+  border-radius: 0.5rem;
+  background: theme('colors.white');
+  padding: 1rem;
+}
+
+.dark .tutorial-endpoint-card,
+.dark .tutorial-summary-card {
+  border-color: theme('colors.dark.700');
+  background: theme('colors.dark.900');
 }
 
 .tutorial-endpoint-title {
   margin-bottom: 0.75rem;
-  font-size: 0.875rem;
-  font-weight: 700;
+  font-size: 0.8125rem;
+  font-weight: 800;
   color: theme('colors.gray.500');
 }
 
@@ -756,10 +1060,11 @@ onMounted(loadPageData)
   position: relative;
   display: grid;
   width: 100%;
+  min-width: 0;
   gap: 0.25rem;
   border: 1px solid theme('colors.gray.200');
-  border-radius: 0.875rem;
-  padding: 0.875rem;
+  border-radius: 0.5rem;
+  padding: 0.75rem;
   text-align: left;
   background: theme('colors.white');
 }
@@ -782,7 +1087,7 @@ onMounted(loadPageData)
 
 .tutorial-endpoint-name {
   font-size: 0.875rem;
-  font-weight: 700;
+  font-weight: 800;
   color: theme('colors.gray.700');
 }
 
@@ -805,16 +1110,16 @@ onMounted(loadPageData)
   grid-template-columns: 1fr 1fr;
   gap: 0.25rem;
   margin-top: 1rem;
-  border-radius: 0.75rem;
+  border-radius: 0.5rem;
   background: theme('colors.gray.100');
   padding: 0.25rem;
 }
 
 .tutorial-os-toggle button {
-  border-radius: 0.625rem;
+  border-radius: 0.375rem;
   padding: 0.5rem;
   font-size: 0.75rem;
-  font-weight: 700;
+  font-weight: 800;
   color: theme('colors.gray.500');
 }
 
@@ -833,8 +1138,37 @@ onMounted(loadPageData)
   color: theme('colors.white');
 }
 
-.tutorial-mobile-endpoints {
+.tutorial-summary-list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.tutorial-summary-row {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.tutorial-summary-row dt {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: theme('colors.gray.400');
+}
+
+.tutorial-summary-row dd {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 0.8125rem;
+  font-weight: 700;
+  color: theme('colors.gray.700');
+}
+
+.dark .tutorial-summary-row dd {
+  color: theme('colors.dark.100');
+}
+
+.tutorial-mobile-sidebar {
   display: none;
+  gap: 1rem;
   width: 100%;
 }
 
@@ -853,7 +1187,7 @@ onMounted(loadPageData)
 
 .tutorial-empty h2 {
   font-size: 1rem;
-  font-weight: 700;
+  font-weight: 800;
   color: theme('colors.gray.900');
 }
 
@@ -881,25 +1215,32 @@ onMounted(loadPageData)
     position: static;
   }
 
-  .tutorial-row {
-    width: 100%;
+  .tutorial-sidebar {
+    display: none;
   }
 
-  .tutorial-select {
-    max-width: none;
-    flex: 1 1 auto;
+  .tutorial-mobile-sidebar {
+    display: grid;
   }
 
   .tutorial-content {
     padding: 1.25rem 1rem 2rem;
   }
+}
 
-  .tutorial-endpoints {
-    display: none;
+@media (max-width: 720px) {
+  .tutorial-client-grid,
+  .tutorial-controls,
+  .tutorial-vscode-guide {
+    grid-template-columns: 1fr;
   }
 
-  .tutorial-mobile-endpoints {
-    display: block;
+  .tutorial-step {
+    padding-left: 2.5rem;
+  }
+
+  .tutorial-vscode-card {
+    margin-left: 0;
   }
 }
 </style>

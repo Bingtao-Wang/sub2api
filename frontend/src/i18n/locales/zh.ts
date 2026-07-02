@@ -1041,6 +1041,10 @@ export default {
     apiKey: 'API Key',
     openaiOfficial: 'OpenAI 官渠',
     maxOfficial: 'Max 官渠',
+    clientDescriptions: {
+      codex: '适合 OpenAI / GPT 模型的官方命令行接入',
+      claude: '适合 Claude / Anthropic 模型的官方命令行接入'
+    },
     endpointTitle: '线路选择',
     defaultEndpoint: '默认线路',
     defaultEndpointDescription: '系统默认 API 地址',
@@ -1054,6 +1058,24 @@ export default {
     loadFailed: '加载使用教程失败',
     configTomlHint: '请确保以下内容位于 config.toml 文件的开头部分',
     claudeSettingsHint: '请将以下内容写入 settings.json 并保存',
+    updateClaudeCliHint: '如果本机已经安装过 Claude Code CLI，执行下面命令即可更新到最新版本。',
+    vscodeClaudeHint: 'CLI 配置保存后，VS Code 扩展会复用同一套 Claude Code 设置；这是可选入口，不影响上面的终端用法。',
+    vscodeClaudeSteps: '1. 打开命令面板：Windows / Linux 按 Ctrl+Shift+P，macOS 按 Cmd+Shift+P。\n2. 输入 Claude Code，选择 Open in New Tab 或 Start Claude Code。\n3. 也可以直接打开 VS Code 集成终端，执行 claude。',
+    optionalIntegration: '可选集成',
+    optionalVsCodeTitle: '在 VS Code 中使用 Claude Code',
+    vscodeGuide: {
+      installExtension: '安装 Claude Code 扩展',
+      openProject: '打开当前项目目录',
+      startClaude: '从扩展或集成终端启动'
+    },
+    summary: {
+      title: '当前配置',
+      client: '接入方式',
+      model: '模型',
+      apiKey: 'API Key',
+      endpoint: 'Base URL',
+      configPath: '配置文件'
+    },
     nodeInstall: {
       chooseMethod: '按你当前选择的系统执行下面任一安装方式；如果命令不可用，可以点击官方安装页面下载安装包。',
       windowsHint: 'Windows 推荐使用 PowerShell 执行。若提示找不到 winget，请改用下方官方安装页面下载安装包。',
@@ -1066,6 +1088,7 @@ export default {
       node: '安装或更新 Node.js（v18.0 或更高版本）。',
       installCodex: '在终端中执行下列命令，安装 Codex。',
       installClaude: '在终端中执行下列命令，安装 Claude Code。',
+      installOrUpdateClaude: '安装或更新 Claude Code CLI。',
       verifyCodex: '运行以下命令验证安装。若有版本号输出，则表示安装成功。',
       verifyClaude: '运行以下命令验证安装。若有版本号输出，则表示安装成功。',
       createConfigDir: '创建并打开配置目录。如果 .codex 目录不存在，需要先创建。',
@@ -1073,6 +1096,8 @@ export default {
       openConfigFile: '然后打开配置文件：',
       writeConfig: '编辑配置文件，将以下内容写入并保存。',
       writeClaudeConfig: '编辑 Claude Code 配置文件，将以下内容写入并保存。',
+      updateClaudeCli: '更新 Claude Code CLI。',
+      useClaudeInVsCode: '在 VS Code 中使用 Claude Code。',
       startCodex: '启动 Codex 并开始使用。',
       startClaude: '启动 Claude Code 并开始使用。'
     }

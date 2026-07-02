@@ -25,6 +25,19 @@ export interface BuildClaudeCodeConfigOptions {
   settingsHint?: string
 }
 
+const claudeCodeDefaultEnv = [
+  ['ANTHROPIC_DEFAULT_FABLE_MODEL', 'claude-fable-5[1M]'],
+  ['ANTHROPIC_DEFAULT_FABLE_MODEL_NAME', 'claude-fable-5'],
+  ['ANTHROPIC_DEFAULT_SONNET_MODEL', 'claude-sonnet-5'],
+  ['ANTHROPIC_DEFAULT_SONNET_MODEL_NAME', 'claude-sonnet-5'],
+  ['ANTHROPIC_DEFAULT_OPUS_MODEL', 'claude-opus-4-8'],
+  ['ANTHROPIC_DEFAULT_OPUS_MODEL_NAME', 'claude-opus-4-8'],
+  ['CLAUDE_CODE_ATTRIBUTION_HEADER', '0'],
+  ['CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC', '1'],
+  ['CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS', '1'],
+  ['ENABLE_TOOL_SEARCH', 'true'],
+] as const
+
 export function buildCodexConfigFiles(options: BuildCodexConfigOptions): ClientConfigFile[] {
   const {
     baseUrl,
@@ -88,6 +101,12 @@ export function buildClaudeCodeConfigFiles(options: BuildClaudeCodeConfigOptions
   } = options
 
   const files: ClientConfigFile[] = []
+  const envEntries = [
+    ['ANTHROPIC_BASE_URL', baseUrl],
+    ['ANTHROPIC_AUTH_TOKEN', apiKey],
+    ...(model ? [['ANTHROPIC_MODEL', model] as const] : []),
+    ...claudeCodeDefaultEnv,
+  ] as const
 
   if (includeShellEnv) {
     switch (os) {
@@ -95,28 +114,19 @@ export function buildClaudeCodeConfigFiles(options: BuildClaudeCodeConfigOptions
       case 'windows':
         files.push({
           path: 'Command Prompt',
-          content: `set ANTHROPIC_BASE_URL=${baseUrl}
-set ANTHROPIC_AUTH_TOKEN=${apiKey}
-set CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
-set CLAUDE_CODE_ATTRIBUTION_HEADER=0`,
+          content: envEntries.map(([key, value]) => `set ${key}=${value}`).join('\n'),
         })
         break
       case 'powershell':
         files.push({
           path: 'PowerShell',
-          content: `$env:ANTHROPIC_BASE_URL="${baseUrl}"
-$env:ANTHROPIC_AUTH_TOKEN="${apiKey}"
-$env:CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
-$env:CLAUDE_CODE_ATTRIBUTION_HEADER=0`,
+          content: envEntries.map(([key, value]) => `$env:${key}="${value}"`).join('\n'),
         })
         break
       default:
         files.push({
           path: 'Terminal',
-          content: `export ANTHROPIC_BASE_URL="${baseUrl}"
-export ANTHROPIC_AUTH_TOKEN="${apiKey}"
-export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
-export CLAUDE_CODE_ATTRIBUTION_HEADER=0`,
+          content: envEntries.map(([key, value]) => `export ${key}="${value}"`).join('\n'),
         })
     }
   }
@@ -124,19 +134,15 @@ export CLAUDE_CODE_ATTRIBUTION_HEADER=0`,
   const settingsPath = os === 'unix'
     ? '~/.claude/settings.json'
     : '%userprofile%\\.claude\\settings.json'
-  const modelLine = model
-    ? `,
-    "ANTHROPIC_MODEL": "${model}"`
-    : ''
+  const settingsEnv = envEntries
+    .map(([key, value], index) => `    "${key}": ${JSON.stringify(value)}${index === envEntries.length - 1 ? '' : ','}`)
+    .join('\n')
 
   files.push({
     path: settingsPath,
     content: `{
   "env": {
-    "ANTHROPIC_BASE_URL": "${baseUrl}",
-    "ANTHROPIC_AUTH_TOKEN": "${apiKey}",
-    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
-    "CLAUDE_CODE_ATTRIBUTION_HEADER": "0"${modelLine}
+${settingsEnv}
   }
 }`,
     hint: settingsHint,

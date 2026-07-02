@@ -56,7 +56,12 @@ describe('buildClaudeCodeConfigFiles', () => {
     expect(files[0].content).toContain('"ANTHROPIC_BASE_URL": "https://api.example.com"')
     expect(files[0].content).toContain('"ANTHROPIC_AUTH_TOKEN": "sk-claude"')
     expect(files[0].content).toContain('"ANTHROPIC_MODEL": "claude-opus-4-8"')
+    expect(files[0].content).toContain('"ANTHROPIC_DEFAULT_FABLE_MODEL": "claude-fable-5[1M]"')
+    expect(files[0].content).toContain('"ANTHROPIC_DEFAULT_SONNET_MODEL": "claude-sonnet-5"')
+    expect(files[0].content).toContain('"ANTHROPIC_DEFAULT_OPUS_MODEL": "claude-opus-4-8"')
     expect(files[0].content).toContain('"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"')
+    expect(files[0].content).toContain('"CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"')
+    expect(files[0].content).toContain('"ENABLE_TOOL_SEARCH": "true"')
   })
 
   it('keeps the shell environment snippet available for the use-key modal', () => {
@@ -68,6 +73,7 @@ describe('buildClaudeCodeConfigFiles', () => {
 
     expect(files[0].path).toBe('PowerShell')
     expect(files[0].content).toContain('$env:ANTHROPIC_BASE_URL="https://api.example.com"')
+    expect(files[0].content).toContain('$env:ENABLE_TOOL_SEARCH="true"')
     expect(files[1].path).toBe('%userprofile%\\.claude\\settings.json')
   })
 })
