@@ -203,6 +203,8 @@ type APIKeyService struct {
 	userSubRepo           UserSubscriptionRepository
 	userGroupRateRepo     UserGroupRateRepository
 	accountRepo           AccountRepository
+	billingService        *BillingService
+	pricingResolver       *ModelPricingResolver
 	cache                 APIKeyCache
 	rateLimitCacheInvalid RateLimitCacheInvalidator // optional: invalidate Redis rate limit cache
 	cfg                   *config.Config
@@ -247,6 +249,12 @@ func (s *APIKeyService) SetAccountRepository(repo AccountRepository) {
 	s.accountRepo = repo
 }
 
+// SetImagePricingDependencies enables user-facing image price estimates.
+func (s *APIKeyService) SetImagePricingDependencies(billingService *BillingService, resolver *ModelPricingResolver) {
+	s.billingService = billingService
+	s.pricingResolver = resolver
+}
+
 func (s *APIKeyService) compileAPIKeyIPRules(apiKey *APIKey) {
 	if apiKey == nil {
 		return
@@ -256,12 +264,13 @@ func (s *APIKeyService) compileAPIKeyIPRules(apiKey *APIKey) {
 }
 
 type ImageGenerationAPIKeyOption struct {
-	ID        int64    `json:"id"`
-	Name      string   `json:"name"`
-	Key       string   `json:"key"`
-	GroupID   int64    `json:"group_id"`
-	GroupName string   `json:"group_name"`
-	Models    []string `json:"models"`
+	ID            int64                                  `json:"id"`
+	Name          string                                 `json:"name"`
+	Key           string                                 `json:"key"`
+	GroupID       int64                                  `json:"group_id"`
+	GroupName     string                                 `json:"group_name"`
+	Models        []string                               `json:"models"`
+	PricesByModel map[string]map[string]*float64 `json:"prices_by_model,omitempty"`
 }
 
 type ImageGenerationOptions struct {
@@ -474,6 +483,10 @@ func (s *APIKeyService) GetImageGenerationOptions(ctx context.Context, userID in
 	}
 
 	modelsByGroup := make(map[int64][]string)
+	userGroupRates, err := s.GetUserGroupRates(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
 	out := make([]ImageGenerationAPIKeyOption, 0, len(keys))
 	for i := range keys {
 		key := &keys[i]
@@ -496,15 +509,85 @@ func (s *APIKeyService) GetImageGenerationOptions(ctx context.Context, userID in
 			continue
 		}
 		out = append(out, ImageGenerationAPIKeyOption{
-			ID:        key.ID,
-			Name:      key.Name,
-			Key:       key.Key,
-			GroupID:   group.ID,
-			GroupName: group.Name,
-			Models:    models,
+			ID:            key.ID,
+			Name:          key.Name,
+			Key:           key.Key,
+			GroupID:       group.ID,
+			GroupName:     group.Name,
+			Models:        models,
+			PricesByModel: s.estimateImagePricesByModel(ctx, key, models, userGroupRates),
 		})
 	}
 	return &ImageGenerationOptions{Keys: out}, nil
+}
+
+func (s *APIKeyService) estimateImagePricesByModel(ctx context.Context, apiKey *APIKey, models []string, userGroupRates map[int64]float64) map[string]map[string]*float64 {
+	if apiKey == nil || apiKey.Group == nil || s.billingService == nil || len(models) == 0 {
+		return nil
+	}
+
+	multiplier := 1.0
+	if s.cfg != nil {
+		multiplier = s.cfg.Default.RateMultiplier
+	}
+	if apiKey.GroupID != nil {
+		multiplier = apiKey.Group.RateMultiplier
+		if userGroupRates != nil {
+			if userRate, ok := userGroupRates[*apiKey.GroupID]; ok {
+				multiplier = userRate
+			}
+		}
+	}
+	_, imageMultiplier := computePeakAwareMultipliers(apiKey, multiplier, timezone.Now())
+
+	groupConfig := &ImagePriceConfig{
+		Price1K: apiKey.Group.ImagePrice1K,
+		Price2K: apiKey.Group.ImagePrice2K,
+		Price4K: apiKey.Group.ImagePrice4K,
+	}
+	out := make(map[string]map[string]*float64, len(models))
+	for _, model := range models {
+		model = strings.TrimSpace(model)
+		if model == "" {
+			continue
+		}
+		out[model] = map[string]*float64{
+			"1K": s.estimateImagePrice(ctx, apiKey.Group.ID, model, "1K", groupConfig, imageMultiplier),
+			"2K": s.estimateImagePrice(ctx, apiKey.Group.ID, model, "2K", groupConfig, imageMultiplier),
+			"4K": s.estimateImagePrice(ctx, apiKey.Group.ID, model, "4K", groupConfig, imageMultiplier),
+		}
+	}
+	return out
+}
+
+func (s *APIKeyService) estimateImagePrice(ctx context.Context, groupID int64, model string, sizeTier string, groupConfig *ImagePriceConfig, multiplier float64) *float64 {
+	sizeTier = NormalizeImageBillingTierOrDefault(sizeTier)
+	if s.pricingResolver != nil {
+		resolved := s.pricingResolver.Resolve(ctx, PricingInput{Model: model, GroupID: &groupID})
+		if resolved != nil && resolved.Source == PricingSourceChannel {
+			cost, err := s.billingService.CalculateCostUnified(CostInput{
+				Ctx:            ctx,
+				Model:          model,
+				GroupID:        &groupID,
+				RequestCount:   1,
+				SizeTier:       sizeTier,
+				RateMultiplier: multiplier,
+				Resolver:       s.pricingResolver,
+				Resolved:       resolved,
+			})
+			if err == nil && cost != nil {
+				value := cost.ActualCost
+				return &value
+			}
+			return nil
+		}
+	}
+	cost := s.billingService.CalculateImageCost(model, sizeTier, 1, groupConfig, multiplier)
+	if cost == nil {
+		return nil
+	}
+	value := cost.ActualCost
+	return &value
 }
 
 func (s *APIKeyService) imageGenerationModelsForGroup(ctx context.Context, groupID int64) ([]string, error) {

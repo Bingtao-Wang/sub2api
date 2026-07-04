@@ -38,6 +38,8 @@
   - [6.3 回滚流程](#63-回滚流程)
   - [6.4 宿主机缺少构建工具时的替代验证](#64-宿主机缺少构建工具时的替代验证)
 - [七、更新记录](#七更新记录)
+  - [2026-07-04](#2026-07-04)
+  - [2026-07-02](#2026-07-02)
   - [2026-06-30](#2026-06-30)
   - [2026-06-28](#2026-06-28)
   - [2026-06-27](#2026-06-27)
@@ -133,18 +135,19 @@ git branch custom/gallery-backup-$(date +%Y%m%d) custom/gallery
 
 ### 1.4 当前远端差异与灾备优先级
 
-2026-07-02 源码更新检查结果：
+2026-07-04 源码更新检查结果：
 
 ```text
 当前分支：custom/gallery
-上游最新：upstream/main 7dc7cfce
-上游 tag：v0.1.142（tag 提交 60da9ba1，upstream/main 另含 VERSION 同步提交 7dc7cfce）
-本次合并提交：d3b61593 Merge upstream v0.1.142 into custom gallery
-本地备份分支：custom/gallery-backup-20260702-005327
-状态：本地 custom/gallery 已合并 upstream/main，尚未推送 origin/custom/gallery
+当前 HEAD：以 `git rev-parse --short=12 HEAD` 为准
+上游最新：upstream/main b650bdd6
+上游 tag：v0.1.144（tag 提交 41def4ba，upstream/main 另含 VERSION 同步提交 b650bdd6）
+最近上游合并提交：7b362860 Merge remote-tracking branch 'upstream/main' into custom/gallery
+最近本地备份分支：custom/gallery-backup-20260704-180206
+状态：本地 custom/gallery 已合并 upstream/main 并提交 PeterAI 多模型生图改造；领先 origin/custom/gallery 的具体提交数以 `git status --short --branch` 为准
 ```
 
-这表示当前 `custom/gallery` 已合并官方 `v0.1.142` 源码，并保留本 fork 的 GPT-5.5 默认模型、图片画廊、PeterAI 画图页、同站静态页覆盖、多级代理层级、顶栏问候和易支付增强。推送前 `origin/custom/gallery` 仍停留在旧提交；生产恢复必须同时依赖数据库 dump、Docker volume 备份和 `deploy/.env`，不能只依赖 Git。
+这表示当前 `custom/gallery` 已合并官方 `v0.1.144` 源码，并保留本 fork 的 GPT-5.5 默认模型、图片画廊、PeterAI 画图页、同站静态页覆盖、多级代理层级、顶栏问候、易支付增强和 PeterAI 多模型生图/严苛计费改造。生产恢复必须同时依赖数据库 dump、Docker volume 备份和 `deploy/.env`，不能只依赖 Git。
 
 已创建离线灾备：
 
@@ -200,7 +203,7 @@ git -C /home/aihub/Peter_ws/sub2api log --oneline --left-right origin/custom/gal
 当前运行约定：
 
 - Compose 项目名：`peter-sub2api`
-- 应用镜像：`sub2api-custom:20260630-peterai-repeat-fix2`
+- 应用镜像：`sub2api-custom:20260704-upstream-v0144-06900a8c1836`
 - 本机监听：`127.0.0.1:18080`
 - 容器服务端口：`8080`
 - Postgres：Compose 内部服务 `postgres`
@@ -606,7 +609,7 @@ sha256sum /home/aihub/Peter_ws/sub2api/deploy/static/image-generator/*
 sg docker -c 'docker exec peter-sub2api-sub2api-1 sh -lc "sha256sum /app/data/public/image-generator/index.html /app/data/public/image-generator/main.js"'
 ```
 
-6. 如果 `/custom/<id>` 的 iframe URL 需要强制刷新缓存，同步更新数据库 `settings.custom_menu_items` 中该菜单 URL 的查询参数，例如 `?v=image-502-failover-20260627`。
+6. 如果 `/custom/<id>` 的 iframe URL 需要强制刷新缓存，同步更新数据库 `settings.custom_menu_items` 中该菜单 URL 的查询参数，例如 `?v=prompt-selector-fix-20260703`。
 7. 重启应用容器，清掉后端 `HTMLCache`，否则 `/custom/<id>` HTML 里可能仍注入旧菜单 URL：
 
 ```bash
@@ -620,7 +623,58 @@ curl -sS http://127.0.0.1:18080/health
 /home/aihub/Peter_ws/sub2api/deploy/verify-production.sh
 ```
 
-#### 4.3.3 生图 HTTP 502 排查要点
+#### 4.3.3 多模型生图、提示词与费用规则
+
+PeterAI 画图页当前是多模型任务模式，不再是单模型下拉：
+
+- 先选 API Key，再从该 key 所属 OpenAI 分组可用模型中多选模型；不支持一次跨 API Key 或跨分组混选。
+- 默认选中第一个模型，兼容旧的单模型使用习惯。
+- 左侧“模型任务”区域显示每个模型的任务行、预计张数、单模型费用和灰色提示词提示。
+- 灰色提示文案规则：未设置单独提示词时显示“使用统一提示词：xxx”或“点击展开设置单独提示词；留空则使用统一提示词”；已设置时显示“已设置单独提示词，点击展开编辑”。
+- 主提示词框是全局统一提示词；每个模型展开后可填单独提示词，单独提示词为空时回退到全局提示词。
+- 生成时把 `selectedModels × count` 展开为独立任务，每个任务固定 `n: 1`，文生图请求 `/v1/images/generations`，图生图请求 `/v1/images/edits`。
+- 前端并发上限降为 `MAX_CONCURRENT = 4`，避免上游限流导致成批失败。
+- 右侧结果按模型分组展示；成功图保存历史、可下载、可发布画廊；失败任务只显示失败，不保存历史、不发布画廊。
+
+提示词识别有一个容易回归的坑：模型覆盖输入框也带 `.input`，不能用 `panel.querySelector('textarea.input, textarea.prompt-textarea')` 读取主提示词，否则会先取到空的单模型覆盖框并报“请输入提示词”。当前必须统一通过：
+
+```text
+getGlobalPromptTextarea(panel) -> panel.querySelector('textarea.prompt-textarea')
+```
+
+相关调用点包括生成参数读取、聚焦主提示词、画廊复用和历史复用。
+
+费用展示当前拆为：
+
+```text
+已选模型
+任务总数
+预估总费用
+生成后成功张数 / 失败张数 / 成功图片预计扣费
+```
+
+前端禁止写死 `$0.1/张`。价格来自 `/api/v1/user/image-generation/options` 返回的 `prices_by_model`：
+
+```json
+{
+  "prices_by_model": {
+    "gpt-image-2": { "1K": 0.1, "2K": 0.1, "4K": 0.1 },
+    "nano-banana-2": { "1K": 0.1, "2K": 0.1, "4K": 0.1 }
+  }
+}
+```
+
+后端估算必须复用 `BillingService.CalculateImageCost` / `CalculateCostUnified` 和 `ModelPricingResolver`，综合用户 API Key 分组、分组图片价格、自定义渠道定价、用户分组倍率和图片倍率。估算不到时返回 `null`，前端显示“以实际扣费为准”。
+
+Images 账号切换仍由后端保证，前端不做账号重试：
+
+- `gpt-image-2` 等模型走 `OpenAIGatewayHandler.Images`。
+- 当前账号遇到可 failover 错误时会加入 `failedAccountIDs`，下一轮通过 `SelectAccountWithSchedulerForImages` 选择同分组下一个兼容账号。
+- 默认 `gateway.max_account_switches = 10`，配置覆盖时以运行配置为准。
+- 可切换错误包括上游 `401/402/403/429/529`、`5xx`、网络/传输错误、无图片输出、非内容策略类临时 `request_rejected`。
+- 内容政策、安全审核、用户参数错误或响应已经开始写出后的错误不会盲目切账号。
+
+#### 4.3.4 生图 HTTP 502 排查要点
 
 `生成失败 HTTP 502` 不一定是前端问题。必须先看后端日志确认真实上游、账号和错误：
 
@@ -720,7 +774,7 @@ backend/internal/service/openai_images_responses.go
 backend/internal/service/openai_images_test.go
 ```
 
-#### 4.3.4 必须验证真实公网文件
+#### 4.3.5 必须验证真实公网文件
 
 如果用户仍反馈旧错误，例如：
 
@@ -763,7 +817,7 @@ NODE
 
 `single_dollar_forEach` 必须为 `0`。如果公网文件正确但用户仍看到旧错误，优先检查 iframe 入口 URL 是否仍在使用旧缓存或另一个域。
 
-#### 4.3.5 前端样式注意事项
+#### 4.3.6 前端样式与历史记录注意事项
 
 历史记录缩略图依赖 `styles.css` 中的 `.history-thumb`：
 
@@ -774,21 +828,28 @@ padding-bottom: 75%;
 
 如果把 `.history-thumb` 从 `div` 改成 `button`，动态 CSS 只能重置 `appearance/border/background`，不要写 `padding: 0`，否则会覆盖 `padding-bottom: 75%`，导致缩略图高度变成 0、看起来不显示。
 
-当前价格展示：
+历史记录当前不再有人为 `5` 条限制：
 
 ```text
-统一价每张 $0.1
-预估费用按每张 $0.10 计算
+localStorage 旧 key：image_gen_history
+IndexedDB：image_gen_history_images
+object store：images、entries
 ```
 
-线上验证：
+旧 `localStorage` 历史会迁移到 IndexedDB 的 `entries`，图片原图继续保存在 `images`。历史页文案必须表达“本地浏览器尽量保存所有记录和原图，但受浏览器清理、隐私模式、站点数据清除、存储配额影响，重要图片请及时下载”，不要再写“服务器仅保存近期 5 张”。
+
+可通过 `navigator.storage.estimate()` 显示当前 origin 的本地存储使用量。这里的“无限制”只表示 PeterAI 不再主动 `slice(5)` 或 `splice(HISTORY_LIMIT)`；真实上限仍由浏览器/设备配额决定。
+
+当前价格展示不再写死统一价，而是按当前 API Key 的 `prices_by_model` 估算。线上验证：
 
 ```bash
-curl -sS https://api.peterai.cc.cd/image-generator/ | grep -nE '统一价|\$0\.5|\$0\.50|\$0\.1|main\.js'
-curl -sS 'https://api.peterai.cc.cd/image-generator/main.js?v=price-010-dollar-20260622' | grep -nE 'PRICE_PER_IMAGE|costEl\.textContent'
+curl -sS https://api.peterai.cc.cd/image-generator/ -o /tmp/image-generator-index.html
+grep -nE '价格按当前 API 密钥|main\.js' /tmp/image-generator-index.html
+! grep -n '服务器存储空间有限' /tmp/image-generator-index.html
+curl -sS 'https://api.peterai.cc.cd/image-generator/main.js?v=prompt-selector-fix-20260703' | grep -nE 'pricesByModel|prices_by_model|PRICE_PER_IMAGE|HISTORY_LIMIT|getGlobalPromptTextarea'
 ```
 
-如果浏览器仍显示旧价格，通常是缓存。强制刷新：
+公网 `main.js` 不应再出现 `PRICE_PER_IMAGE` 或 `HISTORY_LIMIT`。如果浏览器仍显示旧价格或 5 张提示，通常是缓存。强制刷新：
 
 - Windows/Linux：`Ctrl + F5`
 - macOS：`Cmd + Shift + R`
@@ -799,7 +860,7 @@ curl -sS 'https://api.peterai.cc.cd/image-generator/main.js?v=price-010-dollar-2
 当前 PeterAI 画图菜单 URL 来自数据库 `settings.custom_menu_items`，不是前端硬编码。当前应指向：
 
 ```text
-https://api.peterai.cc.cd/image-generator/?v=repeat-fix-20260630
+https://api.peterai.cc.cd/image-generator/?v=prompt-selector-fix-20260703
 ```
 
 检查命令：
@@ -820,7 +881,7 @@ const items = JSON.parse(fs.readFileSync('/tmp/custom_menu_items.json', 'utf8').
 for (const item of items) {
   if (item.url && item.url.includes('/image-generator/')) {
     const u = new URL(item.url)
-    u.searchParams.set('v', 'image-502-failover-20260627')
+    u.searchParams.set('v', 'prompt-selector-fix-20260703')
     item.url = u.toString()
   }
 }
@@ -833,7 +894,7 @@ sg docker -c 'docker exec -i peter-sub2api-postgres-1 psql -U sub2api -d sub2api
 如果要强制 iframe 入口刷新缓存，给菜单 URL 加查询参数，例如：
 
 ```text
-https://api.peterai.cc.cd/image-generator/?v=image-502-failover-20260627
+https://api.peterai.cc.cd/image-generator/?v=prompt-selector-fix-20260703
 ```
 
 注意：直接改数据库 `settings.custom_menu_items` 后，`/custom/<id>` 的 HTML 注入配置可能仍被后端 `HTMLCache` 缓存。需要重启应用容器或通过管理端设置保存流程触发缓存失效：
@@ -1108,7 +1169,7 @@ curl -sS https://api.peterai.cc.cd/health
 
 ### 5.1 图片生成价格
 
-当前所有用户组图片价格已调整为每张 `0.1`：
+当前数据库里所有用户组的基础图片价格仍为每张 `0.1`：
 
 ```sql
 update groups
@@ -1122,6 +1183,23 @@ set image_price_1k = 0.1,
 ```text
 total_cost = 0.1000000000
 actual_cost = 0.1000000000
+```
+
+但 PeterAI 前端不能再把 `$0.1/张` 写死。当前规则是：
+
+- `/api/v1/user/image-generation/options` 返回每个 API Key、每个模型、每个 `1K/2K/4K` 档位的 `prices_by_model`。
+- 返回价格按用户 API Key 所属分组计算，包含分组图片价格、自定义渠道定价、用户分组倍率、图片倍率和峰值倍率。
+- 后端估算逻辑在 `APIKeyService.estimateImagePricesByModel`，依赖 `BillingService.CalculateImageCost` / `CalculateCostUnified` 和 `ModelPricingResolver`。
+- 前端只做展示和成功任务汇总，估算不到时显示“以实际扣费为准”。
+- 真正扣费仍以 Images 转发成功后的 usage 记录为准。
+
+涉及文件：
+
+```text
+backend/internal/service/api_key_service.go
+backend/cmd/server/wire_gen.go
+deploy/static/image-generator/main.js
+deploy/static/image-generator/index.html
 ```
 
 ### 5.2 失败请求不扣费
@@ -1149,6 +1227,8 @@ backend/internal/service/openai_images_test.go
 - `backend/internal/service/openai_images.go` 的主 Images API 路径已把 `imageCount` 初始化为 `0`，非流式响应只有解析到图片输出时才增加计费张数。
 - `backend/internal/service/openai_images_responses.go` 的 OAuth/Responses 转换路径在无图时会优先返回 `UpstreamFailoverError` 或上游拒绝错误；无最终图片不能进入成功计费路径。
 - 非内容策略类 `request_rejected` 对生图路径按可切换账号错误处理，避免第一个账号拒绝后直接失败。
+- PeterAI 多模型模式下每张图都是一个独立 `n: 1` 请求；部分失败时，只有成功返回图片且 `ImageCount > 0` 的请求会进入 usage/billing。
+- 前端失败任务不得保存历史、不得发布画廊、不得计入“成功图片预计扣费”。
 
 已处理历史失败扣费：
 
@@ -1244,6 +1324,8 @@ NODE
 sg docker -c 'docker compose -f /home/aihub/Peter_ws/sub2api/deploy/docker-compose.yml --env-file /home/aihub/Peter_ws/sub2api/deploy/.env exec -T postgres sh -lc '\''psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -P pager=off -c "select min(image_price_1k), max(image_price_1k), min(image_price_2k), max(image_price_2k), min(image_price_4k), max(image_price_4k) from groups;"'\'''
 ```
 
+检查 PeterAI 用户侧价格接口需要带登录态；可在浏览器 Network 中看 `/api/v1/user/image-generation/options` 返回是否包含 `prices_by_model`。服务端实现必须能在缺少可估算价格时返回 `null`，前端显示“以实际扣费为准”。
+
 ### 6.2 发布流程
 
 标准发布：
@@ -1274,8 +1356,10 @@ sg docker -c 'docker compose -f /home/aihub/Peter_ws/sub2api/deploy/docker-compo
 - 后台登录正常
 - API Key 请求正常
 - PeterAI 画图页面正常
-- 成功图片按 `$0.1` 计费
+- PeterAI 可多选模型，且模型任务提示显示统一/单独提示词状态
+- 成功图片按 `/api/v1/user/image-generation/options` 返回的模型价格估算和后端 usage 实际扣费
 - 失败图片不扣图片费用
+- 历史记录超过 5 张仍可展示，历史页不再出现“服务器仅保存近期 5 张”
 - 支付入口和回调页面正常
 - 代理层级表折叠/排序正常，用户侧“我的代理团队”菜单不闪跳
 - 顶栏中间问候显示当前用户名，夜深时显示休息提醒文案
@@ -1379,6 +1463,57 @@ sg docker -c 'docker compose -f /home/aihub/Peter_ws/sub2api/deploy/docker-compo
 如果要进一步增强源码级验证，可以在 CI 中跑更完整的 `go test ./...`、`pnpm vitest`、`pnpm build`。本机默认使用 Docker 测试脚本和运行态验收。
 
 ## 七、更新记录
+
+### 2026-07-04
+
+- 已按本手册流程把 `custom/gallery` 合并到官方最新源码：
+  - 上游 tag：`v0.1.144`。
+  - 上游 HEAD：`b650bdd6`。
+  - 本次合并提交：`7b362860 Merge remote-tracking branch 'upstream/main' into custom/gallery`。
+  - PeterAI 多模型改造已提交，具体 HEAD 以 `git log --oneline -3` 为准。
+  - 合并前已创建备份分支：`custom/gallery-backup-20260704-180206`。
+  - 合并过程无文件冲突；随后恢复了合并前暂存的 PeterAI 多模型生图与维护文档改动。
+  - 当前本地 `custom/gallery` 领先 `origin/custom/gallery`，后续确认后需要推送。
+- 已构建并部署本次上游同步后的生产镜像：
+  - 当前运行镜像：`sub2api-custom:20260704-upstream-v0144-06900a8c1836`。
+  - 镜像 ID：`sha256:09e001bce51d39f2892dbe40ad0aa88612b3d5e0db9ea9b81d0b79dbcddb2618`。
+  - 仅重建应用容器 `sub2api`，Postgres / Redis 未重建。
+  - 发布前本地备份成功：`/home/aihub/Peter_ws/sub2api-backups/20260704_180733`，Postgres dump `86M`，App data tar.gz `26M`。
+  - 发布前磁盘曾满，已执行 `docker image prune -f` 清理悬空构建层，释放约 `9.067GB`；清理后根分区约剩余 `41G`。
+- 已按 PeterAI 多模型生图与严苛计费方案更新维护手册，当前生产要点如下：
+  - 当前静态页版本：`prompt-selector-fix-20260703`。
+  - 当前自定义菜单 iframe URL：`image-generator/?v=prompt-selector-fix-20260703`。
+  - 当前容器：`peter-sub2api-sub2api-1`，本机健康入口：`http://127.0.0.1:18080/health`。
+- PeterAI 多模型生图已上线：
+  - 模型选择从单选改为多选，仍按当前 API Key 所属 OpenAI 分组加载模型。
+  - 每次生成拆成 `selectedModels × count` 个独立 `n: 1` 请求，优先保证每张图独立成败和失败不扣费。
+  - 文生图走 `/v1/images/generations`，图生图走 `/v1/images/edits`。
+  - 任务并发降为 `MAX_CONCURRENT = 4`。
+  - 结果区按模型分组，失败任务只显示失败，不保存历史、不发布画廊。
+- 单模型提示词覆盖已上线：
+  - 主提示词作为全局统一提示词。
+  - 每个模型任务行可展开填写单独提示词，留空则使用统一提示词。
+  - 模型任务行中间灰色提示会显示“使用统一提示词：xxx”或“已设置单独提示词，点击展开编辑”。
+  - 修复提示词读取 bug：统一提示词必须通过 `getGlobalPromptTextarea(panel)` 读取，避免被空的 `.model-prompt-override.input` 抢先匹配后误报“请输入提示词”。
+- 价格展示和后端估算已改造：
+  - `/api/v1/user/image-generation/options` 返回 `prices_by_model`。
+  - 后端估算复用 `BillingService.CalculateImageCost` / `CalculateCostUnified` 和 `ModelPricingResolver`。
+  - 前端不再写死 `$0.1/张`，估算不到显示“以实际扣费为准”。
+  - 失败任务显示 `$0.00`，只统计成功图片预计扣费。
+- 历史记录已取消人为 5 条限制：
+  - 移除 `HISTORY_LIMIT = 5` / `history.splice(...)` 逻辑。
+  - 历史 metadata 迁入 IndexedDB `entries`，原图继续放 IndexedDB `images`。
+  - 旧 `localStorage` 历史保留迁移入口。
+  - 历史页文案改为本地浏览器尽量保存，仍受浏览器清理、隐私模式、站点数据清除和存储配额影响。
+- 已验证：
+  - Docker 构建阶段 `go build -tags embed ./cmd/server` 通过。
+  - `deploy/publish-image-generator.sh` 已发布静态文件到 `/app/data/public/image-generator`。
+  - `deploy/verify-production.sh` 通过。
+  - 仓库 `deploy/static/image-generator/` 与容器静态文件 hash 一致。
+- 需要继续注意：
+  - 当前 `deploy/verify-production.sh` 仍检查数据库分组图片基础价均为 `0.10000000`，这是运行态基准校验；PeterAI 前端展示价格仍必须来自 `prices_by_model`。
+  - 修改 `index.html` 中 `main.js?v=...` 后，必须同步数据库 `settings.custom_menu_items` 并重启应用容器清理 HTML/settings 缓存。
+  - 本机宿主环境可能没有 `go` / `gofmt`，后端编译验证优先用 Docker 构建或容器内 Go 工具链。
 
 ### 2026-07-02
 

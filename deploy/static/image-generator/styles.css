@@ -508,9 +508,7 @@ h3 {
 
 .cost-card {
   grid-column: 1 / -1;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+  display: block;
   gap: 12px;
   border: 1px solid rgba(20, 184, 166, 0.2);
   border-radius: 14px;
@@ -533,6 +531,162 @@ h3 {
 .cost-value {
   color: var(--accent);
   font-weight: 800;
+}
+
+.cost-breakdown {
+  display: grid;
+  gap: 6px;
+}
+
+.cost-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: #475569;
+  font-size: 12px;
+}
+
+.cost-row strong {
+  color: #0f766e;
+  font-weight: 800;
+}
+
+.model-select-panel {
+  display: grid;
+  gap: 8px;
+}
+
+.model-select-head,
+.model-task-title,
+.result-model-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.model-select-head div {
+  display: inline-flex;
+  gap: 6px;
+}
+
+.model-select-head button {
+  border: 1px solid rgba(20, 184, 166, 0.32);
+  border-radius: 6px;
+  padding: 3px 7px;
+  color: #0f766e;
+  font-size: 12px;
+  font-weight: 700;
+  background: rgba(240, 253, 250, 0.74);
+}
+
+.model-option-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 6px;
+}
+
+.model-option {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid rgba(203, 213, 225, 0.78);
+  border-radius: 8px;
+  padding: 7px 8px;
+  background: rgba(255, 255, 255, 0.72);
+  color: #334155;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.model-option span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-option em,
+.model-task-title em,
+.model-task summary strong {
+  color: #0d9488;
+  font-style: normal;
+  font-weight: 800;
+}
+
+.model-task-list {
+  display: grid;
+  gap: 6px;
+  border-top: 1px solid rgba(226, 232, 240, 0.8);
+  padding-top: 8px;
+}
+
+.model-task {
+  border: 1px solid rgba(226, 232, 240, 0.86);
+  border-radius: 8px;
+  background: rgba(248, 250, 252, 0.74);
+}
+
+.model-task summary {
+  display: grid;
+  grid-template-columns: minmax(110px, 0.9fr) minmax(150px, 1.35fr) auto auto;
+  gap: 8px;
+  align-items: center;
+  cursor: pointer;
+  padding: 7px 8px;
+  color: #475569;
+  font-size: 12px;
+}
+
+.model-task-name {
+  min-width: 0;
+  overflow: hidden;
+  color: #0f172a;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-task-hint {
+  min-width: 0;
+  overflow: hidden;
+  color: #94a3b8;
+  font-size: 11px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-prompt-override {
+  width: calc(100% - 16px);
+  min-height: 58px;
+  margin: 0 8px 8px;
+  font-size: 12px;
+}
+
+.model-empty {
+  border: 1px dashed rgba(203, 213, 225, 0.86);
+  border-radius: 8px;
+  padding: 8px;
+  color: #94a3b8;
+  font-size: 12px;
+  text-align: center;
+}
+
+@media (max-width: 760px) {
+  .model-task summary {
+    grid-template-columns: minmax(0, 1fr) auto auto;
+  }
+
+  .model-task-hint {
+    grid-column: 1 / -1;
+    order: 4;
+  }
 }
 
 .btn {
@@ -1357,6 +1511,59 @@ h3 {
   font-size: 13px;
 }
 
+.generation-task-status {
+  display: grid;
+  width: min(100%, 620px);
+  max-height: 220px;
+  gap: 6px;
+  overflow: auto;
+  margin-top: 8px;
+}
+
+.generation-task-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
+  gap: 8px;
+  align-items: center;
+  border: 1px solid rgba(226, 232, 240, 0.82);
+  border-radius: 8px;
+  padding: 6px 8px;
+  background: rgba(255, 255, 255, 0.76);
+  color: #64748b;
+  font-size: 12px;
+}
+
+.generation-task-row span {
+  min-width: 0;
+  overflow: hidden;
+  color: #334155;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.generation-task-row strong {
+  color: #64748b;
+}
+
+.generation-task-row small {
+  color: #0f766e;
+  font-weight: 800;
+}
+
+.generation-task-row.task-running strong {
+  color: #2563eb;
+}
+
+.generation-task-row.task-ok strong {
+  color: #0f766e;
+}
+
+.generation-task-row.task-fail strong,
+.generation-task-row.task-fail small {
+  color: #dc2626;
+}
+
 .gen-btn-spin {
   animation: spin 1s linear infinite;
 }
@@ -1367,6 +1574,69 @@ h3 {
   min-height: 0;
   flex-direction: column;
   gap: clamp(10px, 1.4vh, 14px);
+}
+
+.result-model-groups {
+  display: grid;
+  min-height: 0;
+  gap: 12px;
+  overflow: auto;
+}
+
+.result-model-group {
+  display: grid;
+  gap: 8px;
+}
+
+.result-model-head {
+  border-bottom: 1px solid rgba(226, 232, 240, 0.78);
+  padding-bottom: 6px;
+}
+
+.result-model-head h4 {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: #0f172a;
+  font-size: 14px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.result-model-head span {
+  flex: 0 0 auto;
+  color: #64748b;
+}
+
+.result-failure-card {
+  display: grid;
+  min-height: 120px;
+  align-content: center;
+  gap: 6px;
+  border: 1px dashed rgba(248, 113, 113, 0.72);
+  border-radius: 12px;
+  padding: 12px;
+  background: rgba(254, 242, 242, 0.78);
+  color: #991b1b;
+  text-align: center;
+}
+
+.result-failure-card strong {
+  font-size: 13px;
+}
+
+.result-failure-card span {
+  overflow: hidden;
+  color: #b91c1c;
+  font-size: 12px;
+  text-overflow: ellipsis;
+}
+
+.result-failure-card em {
+  color: #dc2626;
+  font-style: normal;
+  font-weight: 800;
 }
 
 .gen-result-head {
@@ -2289,6 +2559,48 @@ h3 {
 
 [data-theme="dark"] .cost-hint {
   color: #64748b;
+}
+
+[data-theme="dark"] .cost-row,
+[data-theme="dark"] .model-select-head,
+[data-theme="dark"] .model-task-title,
+[data-theme="dark"] .result-model-head {
+  color: #94a3b8;
+}
+
+[data-theme="dark"] .model-option,
+[data-theme="dark"] .model-task,
+[data-theme="dark"] .generation-task-row {
+  border-color: rgba(71, 85, 105, 0.82);
+  background: rgba(15, 23, 42, 0.72);
+  color: #cbd5e1;
+}
+
+[data-theme="dark"] .model-task-name,
+[data-theme="dark"] .result-model-head h4,
+[data-theme="dark"] .generation-task-row span {
+  color: #e2e8f0;
+}
+
+[data-theme="dark"] .model-task-hint {
+  color: #64748b;
+}
+
+[data-theme="dark"] .model-select-head button {
+  border-color: rgba(45, 212, 191, 0.28);
+  background: rgba(20, 184, 166, 0.14);
+  color: #5eead4;
+}
+
+[data-theme="dark"] .model-empty {
+  border-color: rgba(71, 85, 105, 0.82);
+  color: #94a3b8;
+}
+
+[data-theme="dark"] .result-failure-card {
+  border-color: rgba(248, 113, 113, 0.45);
+  background: rgba(127, 29, 29, 0.26);
+  color: #fecaca;
 }
 
 [data-theme="dark"] .btn-primary {

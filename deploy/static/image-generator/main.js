@@ -29,6 +29,11 @@
     }[ch]));
   }
 
+  function getGlobalPromptTextarea(panel) {
+    if (!panel) return null;
+    return panel.querySelector('textarea.prompt-textarea');
+  }
+
   const _urlParams = new URLSearchParams(window.location.search);
   const iframeState = {
     token: cleanText(_urlParams.get('token')),
@@ -612,6 +617,165 @@
       ]
     };
 
+  const imageModelState = {
+    models: [],
+    selectedModels: [],
+    promptOverrides: {},
+    pricesByModel: {}
+  };
+
+  function normalizePricesByModel(raw) {
+    const out = {};
+    if (!raw || typeof raw !== 'object') return out;
+    Object.entries(raw).forEach(([model, tiers]) => {
+      const modelID = cleanText(model);
+      if (!modelID || !tiers || typeof tiers !== 'object') return;
+      out[modelID] = {};
+      ['1K', '2K', '4K'].forEach(tier => {
+        const value = tiers[tier] ?? tiers[tier.toLowerCase()];
+        out[modelID][tier] = typeof value === 'number' && Number.isFinite(value) ? value : null;
+      });
+    });
+    return out;
+  }
+
+  function getSelectedModels() {
+    return imageModelState.selectedModels.filter(model => imageModelState.models.includes(model));
+  }
+
+  function getPanelSizeIntent(panel) {
+    const activeCard = panel?.querySelector('.ratio-card-active');
+    const ratio = activeCard?.querySelector('.ratio-label')?.textContent || '自动生成';
+    const tier = panel?.querySelector('.tier-btn-active')?.dataset?.tier || 'auto';
+    return buildSizeIntent(ratio, tier);
+  }
+
+  function classifyImageBillingTier(size) {
+    const normalized = cleanText(size).toLowerCase();
+    if (!normalized || normalized === 'auto') return '2K';
+    if (normalized === '1k') return '1K';
+    if (normalized === '2k') return '2K';
+    if (normalized === '4k') return '4K';
+    const match = normalized.match(/^(\d+)x(\d+)$/);
+    if (!match) return '2K';
+    const maxEdge = Math.max(parseInt(match[1], 10) || 0, parseInt(match[2], 10) || 0);
+    if (maxEdge <= 1024) return '1K';
+    if (maxEdge <= 2048) return '2K';
+    return '4K';
+  }
+
+  function getEffectiveModelBillingTier(panel, model) {
+    const sizeIntent = getPanelSizeIntent(panel);
+    if (sizeIntent.size === 'auto') return '1K';
+    const capabilities = getGPTModelCapabilities(model);
+    if (capabilities.supportedSizes.includes(sizeIntent.size)) return classifyImageBillingTier(sizeIntent.size);
+    const scale = Math.min(capabilities.maxResolution / sizeIntent.width, capabilities.maxResolution / sizeIntent.height, 1);
+    const roundTo64 = (n) => Math.round(n / 64) * 64;
+    const width = roundTo64(Math.floor(sizeIntent.width * scale));
+    const height = roundTo64(Math.floor(sizeIntent.height * scale));
+    return classifyImageBillingTier(width + 'x' + height);
+  }
+
+  function formatMoney(value) {
+    if (typeof value !== 'number' || !Number.isFinite(value)) return '以实际扣费为准';
+    return '$' + value.toFixed(4).replace(/0+$/, '').replace(/\.$/, '');
+  }
+
+  function compactPromptHint(prompt) {
+    const text = cleanText(prompt).replace(/\s+/g, ' ');
+    if (!text) return '点击展开设置单独提示词；留空则使用统一提示词';
+    return '使用统一提示词：' + (text.length > 24 ? text.slice(0, 24) + '...' : text);
+  }
+
+  function imageTaskUnitPrice(model, tier) {
+    const price = imageModelState.pricesByModel?.[model]?.[tier];
+    return typeof price === 'number' && Number.isFinite(price) ? price : null;
+  }
+
+  function estimateImageCost(models, count, tier, panel) {
+    let total = 0;
+    let unknown = false;
+    models.forEach(model => {
+      const price = imageTaskUnitPrice(model, panel ? getEffectiveModelBillingTier(panel, model) : tier);
+      if (price == null) {
+        unknown = true;
+      } else {
+        total += price * count;
+      }
+    });
+    return { total, unknown };
+  }
+
+  function renderModelSelectionPanels() {
+    const fields = $$('.image-field').filter(field => {
+      const label = field.querySelector('.input-label');
+      return label && label.textContent.trim().includes('模型');
+    });
+    const models = imageModelState.models;
+    const selected = new Set(getSelectedModels());
+    fields.forEach(field => {
+      field.classList.add('model-field', 'field-span');
+      const oldSelect = field.querySelector('.relative');
+      if (oldSelect) oldSelect.remove();
+      let panel = field.querySelector('.model-select-panel');
+      if (!panel) {
+        panel = document.createElement('div');
+        panel.className = 'model-select-panel';
+        field.appendChild(panel);
+      }
+      const ownerPanel = field.closest('.mode-panel');
+      const count = parseInt(ownerPanel?.querySelector('.image-range')?.value || '1', 10) || 1;
+      const globalPrompt = getGlobalPromptTextarea(ownerPanel)?.value || '';
+      const selectedModels = Array.from(selected);
+      const taskCount = selectedModels.length * count;
+      const estimate = estimateImageCost(selectedModels, count, '', ownerPanel);
+      const optionsHTML = models.length
+        ? models.map(model => {
+          const checked = selected.has(model) ? ' checked' : '';
+          const tier = getEffectiveModelBillingTier(ownerPanel, model);
+          const price = imageTaskUnitPrice(model, tier);
+          return '<label class="model-option"><input type="checkbox" value="' + escapeHTML(model) + '"' + checked + '><span>' + escapeHTML(model) + '</span><em>' + escapeHTML(formatMoney(price)) + '/张</em></label>';
+        }).join('')
+        : '<div class="model-empty">暂无可用生图模型</div>';
+      const tasksHTML = selectedModels.length
+        ? selectedModels.map(model => {
+          const override = imageModelState.promptOverrides[model] || '';
+          const tier = getEffectiveModelBillingTier(ownerPanel, model);
+          const price = imageTaskUnitPrice(model, tier);
+          const modelCost = price == null ? '以实际扣费为准' : formatMoney(price * count);
+          const hint = cleanText(override) ? '已设置单独提示词，点击展开编辑' : compactPromptHint(globalPrompt);
+          return '<details class="model-task"><summary><span class="model-task-name">' + escapeHTML(model) + '</span><span class="model-task-hint">' + escapeHTML(hint) + '</span><span>' + count + ' 张</span><strong>' + escapeHTML(modelCost) + '</strong></summary><textarea class="input model-prompt-override" data-model="' + escapeHTML(model) + '" rows="2" placeholder="单独提示词，留空则使用全局提示词">' + escapeHTML(override) + '</textarea></details>';
+        }).join('')
+        : '<div class="model-empty">请选择至少一个模型</div>';
+      panel.innerHTML = '<div class="model-select-head"><span>已选 ' + selectedModels.length + ' / ' + models.length + '</span><div><button type="button" data-model-action="all">全选</button><button type="button" data-model-action="clear">清空</button></div></div><div class="model-option-list">' + optionsHTML + '</div><div class="model-task-list"><div class="model-task-title"><span>模型任务</span><em>' + taskCount + ' 个独立请求 · ' + escapeHTML(formatMoney(estimate.unknown ? null : estimate.total)) + '</em></div>' + tasksHTML + '</div>';
+      panel.querySelectorAll('.model-option input').forEach(input => {
+        input.addEventListener('change', () => {
+          const value = cleanText(input.value);
+          if (input.checked) {
+            if (!imageModelState.selectedModels.includes(value)) imageModelState.selectedModels.push(value);
+          } else {
+            imageModelState.selectedModels = imageModelState.selectedModels.filter(model => model !== value);
+          }
+          renderModelSelectionPanels();
+          updateCost();
+        });
+      });
+      panel.querySelectorAll('[data-model-action]').forEach(actionBtn => {
+        actionBtn.addEventListener('click', () => {
+          imageModelState.selectedModels = actionBtn.dataset.modelAction === 'all' ? models.slice() : [];
+          renderModelSelectionPanels();
+          updateCost();
+        });
+      });
+      panel.querySelectorAll('.model-prompt-override').forEach(textarea => {
+        textarea.addEventListener('input', () => {
+          const model = cleanText(textarea.dataset.model);
+          imageModelState.promptOverrides[model] = textarea.value;
+        });
+      });
+    });
+  }
+
   (() => {
     let openDropdown = null;
     const LAST_API_KEY_STORAGE_PREFIX = 'peterai_image_generator_last_api_key_v1';
@@ -711,6 +875,10 @@
         const valueNode = trigger.querySelector('.select-value');
         if (valueNode) valueNode.textContent = text;
       });
+      imageModelState.models = [];
+      imageModelState.selectedModels = [];
+      imageModelState.pricesByModel = {};
+      renderModelSelectionPanels();
     }
 
     function syncApiKeySelection(option) {
@@ -727,6 +895,10 @@
         if (!isModelField(field)) return;
         setTriggerSelection(trigger, option);
       });
+      if (option?.value) {
+        imageModelState.selectedModels = [option.value];
+        renderModelSelectionPanels();
+      }
     }
 
     function modelOptionsFromApiKey(option) {
@@ -740,13 +912,18 @@
     function applyModelsForApiKey(option) {
       const models = modelOptionsFromApiKey(option);
       SELECT_OPTIONS['model'] = models.length ? models : [{ value: '', label: '暂无可用生图模型' }];
+      imageModelState.models = models.map(model => model.value);
+      imageModelState.pricesByModel = normalizePricesByModel(option?.pricesByModel || option?.prices_by_model);
+      imageModelState.selectedModels = imageModelState.selectedModels.filter(model => imageModelState.models.includes(model));
       if (models.length) {
-        syncModelSelection(models[0]);
+        if (imageModelState.selectedModels.length === 0) imageModelState.selectedModels = [models[0].value];
+        renderModelSelectionPanels();
         setGenerationAvailability('');
       } else {
         clearModelSelectionLabel('暂无可用生图模型');
         setGenerationAvailability('暂无可用生图模型');
       }
+      updateCost();
     }
 
     function pickPreferredApiKey(options) {
@@ -871,7 +1048,10 @@
         const labelText = label.textContent.trim();
         let key = '';
         if (labelText.includes('API') || labelText.includes('密钥')) key = 'api-key';
-        else if (labelText.includes('模型')) key = 'model';
+        else if (labelText.includes('模型')) {
+          renderModelSelectionPanels();
+          return;
+        }
         else if (labelText.includes('质量')) key = 'quality';
         else if (labelText.includes('背景')) key = 'background';
         else if (labelText.includes('输出格式')) key = 'format';
@@ -918,7 +1098,8 @@
             label: cleanText(item.name || item.key || '未命名密钥'),
             groupId: item.group_id == null ? '' : cleanText(item.group_id),
             groupName: cleanText(item.group_name),
-            models: Array.isArray(item.models) ? item.models.map(model => cleanText(model)).filter(Boolean) : []
+            models: Array.isArray(item.models) ? item.models.map(model => cleanText(model)).filter(Boolean) : [],
+            pricesByModel: normalizePricesByModel(item.prices_by_model)
           }))
           .filter(item => item.value && item.models.length > 0);
         console.log('[生图调试] 获取到可用生图API密钥数量:', apiKeys.length, apiKeys.map(k => ({ label: k.label, group: k.groupName, models: k.models })));
@@ -1137,20 +1318,28 @@
   })();
 
   function updateCost() {
-    const PRICE_PER_IMAGE = 0.1;
-
     $$('.mode-panel').forEach(panel => {
-      const costEl = $('.cost-value', panel);
-      if (!costEl) return;
-
       let count = 1;
-
       const range = $('.image-range', panel);
       if (range) count = parseInt(range.value) || 1;
 
-      const total = (PRICE_PER_IMAGE * count).toFixed(2);
-      costEl.textContent = '$' + total;
+      const models = getSelectedModels();
+      const taskCount = models.length * count;
+      const estimate = estimateImageCost(models, count, '', panel);
+      const costCard = $('.cost-card', panel);
+      if (!costCard) return;
+      const success = parseInt(costCard.dataset.successCount || '', 10);
+      const failed = parseInt(costCard.dataset.failedCount || '', 10);
+      const successCostValue = parseFloat(costCard.dataset.successCost || '');
+      const statusLine = Number.isFinite(success) && Number.isFinite(failed)
+        ? '<div class="cost-row"><span>成功/失败</span><strong>' + success + ' / ' + failed + '</strong></div>'
+        : '';
+      const successLine = Number.isFinite(success)
+        ? '<div class="cost-row"><span>成功图片预计扣费</span><strong>' + escapeHTML(formatMoney(Number.isFinite(successCostValue) ? successCostValue : null)) + '</strong></div>'
+        : '';
+      costCard.innerHTML = '<div class="cost-breakdown"><div class="cost-row"><span>已选模型</span><strong>' + models.length + '</strong></div><div class="cost-row"><span>任务总数</span><strong>' + taskCount + '</strong></div><div class="cost-row"><span>预估总费用</span><strong class="cost-value">' + escapeHTML(formatMoney(estimate.unknown ? null : estimate.total)) + '</strong></div>' + statusLine + successLine + '<p class="cost-hint">每张图独立请求，失败任务显示 $0.00，实际扣费以后端成功记录为准。</p></div>';
     });
+    renderModelSelectionPanels();
   }
 
   updateCost();
@@ -1162,7 +1351,7 @@
   // 单次 Images API 请求最长等待时间。上游长时间无响应时主动重试，避免界面卡住数分钟。
   const IMAGE_REQUEST_TIMEOUT_MS = 90000;
   // 最大并发数：同时生成的图片数量上限，避免并发过高导致接口限流
-  const MAX_CONCURRENT = 10;
+  const MAX_CONCURRENT = 4;
 
   function isRetryableError(err) {
     const msg = (err.message || '').toLowerCase();
@@ -1627,7 +1816,8 @@
         completedCount++;
         updateProgress();
       } catch (err) {
-        results[index] = { error: err, index };
+        if (typeof task.onTaskError === 'function') task.onTaskError(err);
+        results[index] = { error: err, index, task: task.meta || null };
         completedCount++;
         updateProgress();
       }
@@ -1672,10 +1862,11 @@
   }
 
   function getPanelParams(panel) {
-    const textarea = panel.querySelector('textarea.input, textarea.prompt-textarea');
+    const textarea = getGlobalPromptTextarea(panel);
     const prompt = textarea ? textarea.value.trim() : '';
     const modelSelect = panel.querySelectorAll('.select-trigger');
-    let model = 'gpt-image-2';
+    const selectedModels = getSelectedModels();
+    let model = selectedModels[0] || 'gpt-image-2';
     let quality = 'auto';
     let outputFormat = 'png';
     modelSelect.forEach(trigger => {
@@ -1707,13 +1898,12 @@
     
     const range = panel.querySelector('.image-range');
     const count = range ? parseInt(range.value) || 1 : 1;
-    return { prompt, model, quality, outputFormat, sizeIntent, ratio, resolutionTier, count };
+    return { prompt, model, selectedModels, quality, outputFormat, sizeIntent, ratio, resolutionTier, count };
   }
 
   function hasUsableImageGenerationOptions() {
     const keys = SELECT_OPTIONS['api-key'] || [];
-    const models = SELECT_OPTIONS['model'] || [];
-    return keys.some(item => item && item.value) && models.some(item => item && item.value);
+    return keys.some(item => item && item.value) && getSelectedModels().length > 0;
   }
 
   async function textToImage({ prompt, baseURL, apiKey, imageModel, sizeIntent, quality, outputFormat, onProgress }) {
@@ -1983,14 +2173,14 @@
         const panel = btn.closest('.mode-panel');
         if (!panel) return;
 
-        const { prompt, model, quality, outputFormat, sizeIntent, ratio, resolutionTier, count } = getPanelParams(panel);
-        if (!model) {
-          showToast('请选择生图模型', 'warning');
+        const { prompt, selectedModels, quality, outputFormat, sizeIntent, ratio, resolutionTier, count } = getPanelParams(panel);
+        if (!selectedModels.length) {
+          showToast('请选择至少一个生图模型', 'warning');
           return;
         }
         if (!prompt) {
           showToast('请输入提示词', 'warning');
-          const ta = panel.querySelector('textarea.input, textarea.prompt-textarea');
+          const ta = getGlobalPromptTextarea(panel);
           if (ta) ta.focus();
           return;
         }
@@ -2014,6 +2204,13 @@
 
         const canvas = panel.querySelector('.image-canvas');
         if (!canvas) return;
+        const costCard = $('.cost-card', panel);
+        if (costCard) {
+          delete costCard.dataset.successCount;
+          delete costCard.dataset.failedCount;
+          delete costCard.dataset.successCost;
+          updateCost();
+        }
 
         btn.disabled = true;
         btn.dataset.originalHTML = btn.innerHTML;
@@ -2022,8 +2219,9 @@
         const startTime = Date.now();
         let timerInterval = null;
 
-        canvas.innerHTML = '<div class="gen-loading"><div class="gen-spinner"></div><p class="gen-loading-text">正在并行生成 ' + count + ' 张图片，请稍候...</p><p class="gen-loading-hint gen-timer">已用时 0.0 秒</p><p class="gen-progress-text">准备中...</p></div>';
-        if (window._genIndicator) window._genIndicator.show('正在生成 ' + count + ' 张图片...', mode);
+        const totalTasks = selectedModels.length * count;
+        canvas.innerHTML = '<div class="gen-loading"><div class="gen-spinner"></div><p class="gen-loading-text">正在并行生成 ' + totalTasks + ' 个独立任务，请稍候...</p><p class="gen-loading-hint gen-timer">已用时 0.0 秒</p><p class="gen-progress-text">准备中...</p><div class="generation-task-status"></div></div>';
+        if (window._genIndicator) window._genIndicator.show('正在生成 ' + totalTasks + ' 个独立任务...', mode);
 
         const timerEl = canvas.querySelector('.gen-timer');
         const progressEl = canvas.querySelector('.gen-progress-text');
@@ -2040,21 +2238,69 @@
           if (window._genIndicator) window._genIndicator.update(desc);
         }
 
+        const generationTasks = [];
+        selectedModels.forEach(model => {
+          const taskPrompt = (imageModelState.promptOverrides[model] || '').trim() || prompt;
+          const billingTier = getEffectiveModelBillingTier(panel, model);
+          const unitPrice = imageTaskUnitPrice(model, billingTier);
+          for (let i = 0; i < count; i++) {
+            generationTasks.push({
+              id: model + '-' + i + '-' + Date.now(),
+              model,
+              prompt: taskPrompt,
+              mode,
+              index: i,
+              status: '等待中',
+              result: null,
+              error: null,
+              estimatedCost: unitPrice
+            });
+          }
+        });
+
+        function renderTaskStatuses() {
+          const statusEl = canvas.querySelector('.generation-task-status');
+          if (!statusEl) return;
+          statusEl.innerHTML = generationTasks.map((task, idx) => {
+            const statusClass = task.status === '成功' ? 'task-ok' : task.status === '失败' ? 'task-fail' : task.status === '生成中' ? 'task-running' : '';
+            const cost = task.status === '失败' ? '$0.00' : formatMoney(task.estimatedCost);
+            return '<div class="generation-task-row ' + statusClass + '"><span>' + escapeHTML(task.model) + '</span><em>#' + (task.index + 1) + '</em><strong>' + escapeHTML(task.status) + '</strong><small>' + escapeHTML(cost) + '</small></div>';
+          }).join('');
+        }
+        renderTaskStatuses();
+
         const baseURL = (typeof window !== 'undefined' ? window.location.origin : '') || iframeState.srcHost || '';
 
         try {
           onProgress('正在准备请求...');
           await waitForUIFrame();
           const tasks = [];
-          for (let i = 0; i < count; i++) {
-            tasks.push(async () => {
+          generationTasks.forEach((taskMeta, taskIndex) => {
+            const taskFn = async () => {
+              taskMeta.status = '生成中';
+              renderTaskStatuses();
               if (mode === 'image') {
-                return imageToImage({ prompt, sourceImages, baseURL, apiKey, imageModel: model, sizeIntent, quality, outputFormat, onProgress: (desc) => onProgress('图片 ' + (i + 1) + '/' + count + ': ' + desc) });
+                const result = await imageToImage({ prompt: taskMeta.prompt, sourceImages, baseURL, apiKey, imageModel: taskMeta.model, sizeIntent, quality, outputFormat, onProgress: (desc) => onProgress(taskMeta.model + ' 图片 ' + (taskMeta.index + 1) + '/' + count + ': ' + desc) });
+                taskMeta.status = '成功';
+                taskMeta.result = result;
+                renderTaskStatuses();
+                return { ...result, task: taskMeta };
               } else {
-                return textToImage({ prompt, baseURL, apiKey, imageModel: model, sizeIntent, quality, outputFormat, onProgress: (desc) => onProgress('图片 ' + (i + 1) + '/' + count + ': ' + desc) });
+                const result = await textToImage({ prompt: taskMeta.prompt, baseURL, apiKey, imageModel: taskMeta.model, sizeIntent, quality, outputFormat, onProgress: (desc) => onProgress(taskMeta.model + ' 图片 ' + (taskMeta.index + 1) + '/' + count + ': ' + desc) });
+                taskMeta.status = '成功';
+                taskMeta.result = result;
+                renderTaskStatuses();
+                return { ...result, task: taskMeta };
               }
-            });
-          }
+            };
+            taskFn.meta = taskMeta;
+            taskFn.onTaskError = (err) => {
+              taskMeta.status = '失败';
+              taskMeta.error = err;
+              renderTaskStatuses();
+            };
+            tasks.push(taskFn);
+          });
 
           const results = await generateWithConcurrency(tasks, MAX_CONCURRENT, onProgress);
 
@@ -2062,42 +2308,59 @@
           const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
 
           const successfulResults = [];
-          const failedIndices = [];
+          const failedResults = [];
           results.forEach((result, index) => {
             if (result && (result.imageB64 || result.imageURL)) {
               successfulResults.push({ ...result, index });
             } else {
-              failedIndices.push(index);
-              console.error('[生图调试] 图片 ' + (index + 1) + ' 生成失败:', result?.error || '无图片数据');
+              failedResults.push(result || { index, task: generationTasks[index], error: new Error('无图片数据') });
+              console.error('[生图调试] 任务 ' + (index + 1) + ' 生成失败:', result?.error || '无图片数据');
             }
           });
 
           if (successfulResults.length === 0) {
-            const firstFailure = results.find(result => result && result.error);
-            const detail = firstFailure?.error?.message || "所有图片生成均失败，请稍后重试";
-            throw new Error(detail);
+            showToast('所有任务均失败，未产生扣费历史记录', 'warning');
           }
 
           const mimeType = getFormatMime(outputFormat);
           const now = new Date();
           const timeStr = String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0');
           const headTitle = mode === 'image' ? '参考图改绘结果' : '本次生成结果';
-          const failNote = failedIndices.length > 0 ? '（' + failedIndices.length + ' 张生成失败）' : '';
+          const failNote = failedResults.length > 0 ? '（' + failedResults.length + ' 个任务失败，失败费用 $0.00）' : '';
           const headDesc = mode === 'image'
-            ? '基于参考图生成 ' + successfulResults.length + '/' + count + ' 张，耗时 ' + elapsed + ' 秒' + failNote
-            : '并行生成 ' + successfulResults.length + '/' + count + ' 张，耗时 ' + elapsed + ' 秒' + failNote;
+            ? '基于参考图生成 ' + successfulResults.length + '/' + totalTasks + ' 张，耗时 ' + elapsed + ' 秒' + failNote
+            : '并行生成 ' + successfulResults.length + '/' + totalTasks + ' 张，耗时 ' + elapsed + ' 秒' + failNote;
 
           let imagesHTML = '';
-          successfulResults.forEach((result, idx) => {
-            const imageSrc = imageResultSource(result, mimeType);
-            const badge = String(idx + 1).padStart(2, '0');
-            const publishDisabled = result.imageB64 ? '' : ' disabled title="URL 图片暂不支持直接发布到画廊"';
-            imagesHTML += '<div class="result-image-wrap" data-index="' + idx + '"><img src="' + escapeHTML(imageSrc) + '" alt="生成图片 ' + badge + '" loading="lazy" class="result-image" data-action="preview"><span class="result-badge">' + badge + '</span><div class="result-actions"><button type="button" class="result-action-btn" data-action="publish" data-index="' + idx + '"' + publishDisabled + '><svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M12 16.5V9.75m0 0l-3 3m3-3l3 3M6.75 19.5A2.25 2.25 0 014.5 17.25V6.75A2.25 2.25 0 016.75 4.5h10.5a2.25 2.25 0 012.25 2.25v10.5a2.25 2.25 0 01-2.25 2.25H6.75z"/></svg></button><button type="button" class="result-action-btn" data-action="download" data-index="' + idx + '" title="下载"><svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3"/></svg></button><button type="button" class="result-action-btn" data-action="preview" data-index="' + idx + '" title="放大预览"><svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607zM10.5 7.5v6m3-3h-6"/></svg></button></div></div>';
+          selectedModels.forEach(model => {
+            const modelSuccesses = successfulResults.filter(result => result.task?.model === model);
+            const modelFailures = failedResults.filter(result => result.task?.model === model);
+            let groupHTML = '';
+            modelSuccesses.forEach((result) => {
+              const idx = successfulResults.indexOf(result);
+              const imageSrc = imageResultSource(result, mimeType);
+              const badge = String((result.task?.index || 0) + 1).padStart(2, '0');
+              const publishDisabled = result.imageB64 ? '' : ' disabled title="URL 图片暂不支持直接发布到画廊"';
+              groupHTML += '<div class="result-image-wrap" data-index="' + idx + '"><img src="' + escapeHTML(imageSrc) + '" alt="生成图片 ' + badge + '" loading="lazy" class="result-image" data-action="preview"><span class="result-badge">' + badge + '</span><div class="result-actions"><button type="button" class="result-action-btn" data-action="publish" data-index="' + idx + '"' + publishDisabled + '><svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M12 16.5V9.75m0 0l-3 3m3-3l3 3M6.75 19.5A2.25 2.25 0 014.5 17.25V6.75A2.25 2.25 0 016.75 4.5h10.5a2.25 2.25 0 012.25 2.25v10.5a2.25 2.25 0 01-2.25 2.25H6.75z"/></svg></button><button type="button" class="result-action-btn" data-action="download" data-index="' + idx + '" title="下载"><svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3"/></svg></button><button type="button" class="result-action-btn" data-action="preview" data-index="' + idx + '" title="放大预览"><svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607zM10.5 7.5v6m3-3h-6"/></svg></button></div></div>';
+            });
+            modelFailures.forEach((result) => {
+              const message = result?.error?.message || '未返回可用图片数据';
+              groupHTML += '<div class="result-failure-card"><strong>失败 #' + ((result.task?.index || 0) + 1) + '</strong><span>' + escapeHTML(message) + '</span><em>$0.00</em></div>';
+            });
+            if (!groupHTML) groupHTML = '<div class="result-failure-card"><strong>无结果</strong><span>该模型未产生任务结果</span><em>$0.00</em></div>';
+            imagesHTML += '<section class="result-model-group"><div class="result-model-head"><h4>' + escapeHTML(model) + '</h4><span>' + modelSuccesses.length + ' 成功 · ' + modelFailures.length + ' 失败</span></div><div class="gen-multi-preview gen-count-' + Math.min(Math.max(modelSuccesses.length + modelFailures.length, 1), 5) + '">' + groupHTML + '</div></section>';
           });
 
-          const previewClass = successfulResults.length === 1 ? 'gen-single-preview' : 'gen-multi-preview gen-count-' + Math.min(successfulResults.length, 5);
-          canvas.innerHTML = '<div class="gen-results"><div class="gen-result-head"><div><h3>' + headTitle + '</h3><p>' + headDesc + '</p></div><span class="gen-status">完成 · ' + timeStr + '</span></div><div class="' + previewClass + '">' + imagesHTML + '</div></div>';
-          if (window._genIndicator) window._genIndicator.done(successfulResults.length + '/' + count + ' 张图片生成完成', mode);
+          canvas.innerHTML = '<div class="gen-results"><div class="gen-result-head"><div><h3>' + headTitle + '</h3><p>' + headDesc + '</p></div><span class="gen-status">完成 · ' + timeStr + '</span></div><div class="result-model-groups">' + imagesHTML + '</div></div>';
+          if (window._genIndicator) window._genIndicator.done(successfulResults.length + '/' + totalTasks + ' 张图片生成完成', mode);
+          if (costCard) {
+            const hasUnknownSuccessCost = successfulResults.some(result => typeof result.task?.estimatedCost !== 'number');
+            const successCost = successfulResults.reduce((sum, result) => sum + (typeof result.task?.estimatedCost === 'number' ? result.task.estimatedCost : 0), 0);
+            costCard.dataset.successCount = String(successfulResults.length);
+            costCard.dataset.failedCount = String(failedResults.length);
+            costCard.dataset.successCost = hasUnknownSuccessCost ? '' : String(successCost);
+            updateCost();
+          }
 
           const previewImages = canvas.querySelectorAll('.result-image[data-action="preview"], .result-action-btn[data-action="preview"]');
           previewImages.forEach(el => {
@@ -2142,9 +2405,9 @@
               }
               const dataURL = imageResultSource(result, mimeType);
               publishGalleryItem(dataURL, {
-                prompt,
+                prompt: result.task?.prompt || prompt,
                 revisedPrompt: result.revisedPrompt || '',
-                model,
+                model: result.task?.model || '',
                 size: sizeIntent.size || '',
                 quality,
                 outputFormat,
@@ -2160,19 +2423,19 @@
               const dataURL = imageResultSource(result, mimeType);
               const historyId = baseTimestamp + idx;
               const imageStored = await storeHistoryImage(historyId, dataURL);
-              saveToHistory({
+              await saveToHistory({
                 id: historyId,
                 image_key: imageStored ? String(historyId) : '',
                 image: imageStored ? '' : dataURL,
                 mode: mode === 'image' ? '图生图' : '文生图',
-                prompt: prompt,
+                prompt: result.task?.prompt || prompt,
                 count: 1,
                 ratio: ratio,
                 format: outputFormat.toUpperCase(),
-                cost: panel.querySelector('.cost-value')?.textContent || '$0.00',
+                cost: formatMoney(result.task?.estimatedCost),
                 timestamp: now.toISOString(),
                 thumbnail: await createHistoryThumbnail(dataURL),
-                model: model,
+                model: result.task?.model || '',
                 size: sizeIntent.size || '',
                 quality: quality,
                 outputFormat: outputFormat,
@@ -2342,7 +2605,7 @@
     });
     article.querySelector('.gallery-use-btn').addEventListener('click', () => {
       const textPanel = $('#panel-text');
-      const textarea = textPanel?.querySelector('textarea.input, textarea.prompt-textarea');
+      const textarea = getGlobalPromptTextarea(textPanel);
       if (textarea) {
         textarea.value = prompt;
         textarea.dispatchEvent(new Event('input'));
@@ -2430,9 +2693,13 @@
   }
 
   const HISTORY_KEY = 'image_gen_history';
-  const HISTORY_LIMIT = 5;
   const HISTORY_IMAGE_DB = 'image_gen_history_images';
   const HISTORY_IMAGE_STORE = 'images';
+  const HISTORY_ENTRY_STORE = 'entries';
+  const historyState = {
+    entries: [],
+    loaded: false
+  };
 
   function openHistoryImageDB() {
     return new Promise((resolve, reject) => {
@@ -2440,11 +2707,15 @@
         reject(new Error('indexedDB unavailable'));
         return;
       }
-      const req = indexedDB.open(HISTORY_IMAGE_DB, 1);
+      const req = indexedDB.open(HISTORY_IMAGE_DB, 2);
       req.onupgradeneeded = () => {
         const db = req.result;
         if (!db.objectStoreNames.contains(HISTORY_IMAGE_STORE)) {
           db.createObjectStore(HISTORY_IMAGE_STORE);
+        }
+        if (!db.objectStoreNames.contains(HISTORY_ENTRY_STORE)) {
+          const store = db.createObjectStore(HISTORY_ENTRY_STORE, { keyPath: 'id' });
+          store.createIndex('timestamp', 'timestamp', { unique: false });
         }
       };
       req.onsuccess = () => resolve(req.result);
@@ -2499,7 +2770,7 @@
 
   function useHistoryPrompt(prompt) {
     const textPanel = $('#panel-text');
-    const textarea = textPanel?.querySelector('textarea.input, textarea.prompt-textarea');
+    const textarea = getGlobalPromptTextarea(textPanel);
     if (!textarea) {
       showToast('未找到文生图输入框', 'error');
       return;
@@ -2564,45 +2835,117 @@
     }
   }
 
-  function getHistory() {
+  function sortHistoryEntries(entries) {
+    return entries
+      .filter(entry => entry && entry.id && entry.timestamp)
+      .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+  }
+
+  async function loadHistoryEntriesFromDB() {
     try {
-      const parsed = JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]');
-      if (!Array.isArray(parsed)) return [];
-      return parsed
-        .filter(entry => entry && entry.id && entry.timestamp)
-        .slice(0, HISTORY_LIMIT);
-    } catch (e) {
-      return [];
+      const db = await openHistoryImageDB();
+      const entries = await new Promise((resolve, reject) => {
+        const tx = db.transaction(HISTORY_ENTRY_STORE, 'readonly');
+        const req = tx.objectStore(HISTORY_ENTRY_STORE).getAll();
+        req.onsuccess = () => resolve(Array.isArray(req.result) ? req.result : []);
+        req.onerror = () => reject(req.error || new Error('load history entries failed'));
+      });
+      db.close();
+      historyState.entries = sortHistoryEntries(entries);
+      historyState.loaded = true;
+    } catch (err) {
+      console.warn('[历史记录] IndexedDB 元数据读取失败:', err.message || err);
+      historyState.loaded = true;
     }
   }
 
-  function saveToHistory(entry) {
-    const history = getHistory();
-    history.unshift(entry);
-    history.splice(HISTORY_LIMIT);
+  async function storeHistoryEntry(entry) {
+    const db = await openHistoryImageDB();
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction(HISTORY_ENTRY_STORE, 'readwrite');
+      tx.objectStore(HISTORY_ENTRY_STORE).put(entry);
+      tx.oncomplete = resolve;
+      tx.onerror = () => reject(tx.error || new Error('store history entry failed'));
+    });
+    db.close();
+  }
 
-    let saved = false;
-
-    while (!saved) {
-      try {
-        localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
-        saved = true;
-      } catch (e) {
-        if (e.name === 'QuotaExceededError' || e.code === 22) {
-          if (history.length > 1) {
-            history.pop();
-            console.warn('[历史记录] 存储空间不足，已移除最旧记录，剩余 ' + history.length + ' 条');
-          } else {
-            console.error('[历史记录] 存储空间严重不足，无法保存');
-            break;
-          }
-        } else {
-          console.error('[历史记录] 存储失败:', e.message);
-          break;
-        }
-      }
+  async function deleteHistoryEntry(id) {
+    try {
+      const db = await openHistoryImageDB();
+      await new Promise((resolve, reject) => {
+        const tx = db.transaction(HISTORY_ENTRY_STORE, 'readwrite');
+        tx.objectStore(HISTORY_ENTRY_STORE).delete(Number(id));
+        tx.oncomplete = resolve;
+        tx.onerror = () => reject(tx.error || new Error('delete history entry failed'));
+      });
+      db.close();
+    } catch (err) {
+      console.warn('[历史记录] 元数据删除失败:', err.message || err);
     }
+  }
 
+  async function clearHistoryEntries() {
+    try {
+      const db = await openHistoryImageDB();
+      await new Promise((resolve, reject) => {
+        const tx = db.transaction(HISTORY_ENTRY_STORE, 'readwrite');
+        tx.objectStore(HISTORY_ENTRY_STORE).clear();
+        tx.oncomplete = resolve;
+        tx.onerror = () => reject(tx.error || new Error('clear history entries failed'));
+      });
+      db.close();
+      historyState.entries = [];
+    } catch (err) {
+      console.warn('[历史记录] 元数据清空失败:', err.message || err);
+    }
+  }
+
+  async function migrateLocalStorageHistory() {
+    let parsed = [];
+    try {
+      parsed = JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]');
+    } catch {
+      parsed = [];
+    }
+    if (!Array.isArray(parsed) || parsed.length === 0) return;
+    try {
+      for (const entry of parsed) {
+        if (entry && entry.id && entry.timestamp) await storeHistoryEntry(entry);
+      }
+      localStorage.removeItem(HISTORY_KEY);
+    } catch (err) {
+      console.warn('[历史记录] localStorage 迁移失败:', err.message || err);
+    }
+  }
+
+  async function updateHistoryStorageEstimate() {
+    const head = $('#panel-history .history-head');
+    if (!head || !navigator.storage?.estimate) return;
+    try {
+      const estimate = await navigator.storage.estimate();
+      const usageMB = ((estimate.usage || 0) / 1024 / 1024).toFixed(1);
+      const quotaMB = ((estimate.quota || 0) / 1024 / 1024).toFixed(1);
+      let node = head.querySelector('.history-storage-estimate');
+      if (!node) {
+        node = document.createElement('p');
+        node.className = 'history-storage-estimate';
+        head.appendChild(node);
+      }
+      node.textContent = estimate.quota ? '本地存储已用约 ' + usageMB + ' MB / ' + quotaMB + ' MB' : '本地存储已用约 ' + usageMB + ' MB';
+    } catch (err) {
+      console.warn('[历史记录] 存储空间估算失败:', err.message || err);
+    }
+  }
+
+  function getHistory() {
+    return historyState.entries.slice();
+  }
+
+  async function saveToHistory(entry) {
+    await storeHistoryEntry(entry);
+    historyState.entries = sortHistoryEntries([entry, ...historyState.entries.filter(item => item.id !== entry.id)]);
+    updateHistoryStorageEstimate();
     try {
       renderHistory();
     } catch (err) {
@@ -2610,9 +2953,11 @@
     }
   }
 
-  function clearHistory() {
+  async function clearHistory() {
     localStorage.removeItem(HISTORY_KEY);
-    clearHistoryImages();
+    await clearHistoryEntries();
+    await clearHistoryImages();
+    updateHistoryStorageEstimate();
     try {
       renderHistory();
     } catch (err) {
@@ -2636,6 +2981,11 @@
     if (!list) return;
 
     const history = getHistory();
+
+    if (!historyState.loaded) {
+      list.innerHTML = '<div class="history-empty" style="grid-column:1/-1"><div class="image-empty-icon"><svg class="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"/></svg></div><h3>正在加载记录</h3><p>本地历史记录保存在当前浏览器中</p></div>';
+      return;
+    }
 
     if (history.length === 0) {
       list.innerHTML = '<div class="history-empty" style="grid-column:1/-1"><div class="image-empty-icon"><svg class="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"/></svg></div><h3>暂无记录</h3><p>生成图片后记录将显示在这里</p></div>';
@@ -2728,15 +3078,13 @@
     });
 
     $$('.history-delete', list).forEach(btn => {
-      btn.addEventListener('click', e => {
+      btn.addEventListener('click', async e => {
         e.stopPropagation();
         const id = parseInt(btn.dataset.id);
         const entry = getHistory().find(h => h.id === id);
-        const updated = getHistory().filter(h => h.id !== id);
-        deleteHistoryImage(entry?.image_key || id);
-        try {
-          localStorage.setItem(HISTORY_KEY, JSON.stringify(updated));
-        } catch (err) { /* ignore */ }
+        historyState.entries = getHistory().filter(h => h.id !== id);
+        await deleteHistoryEntry(id);
+        await deleteHistoryImage(entry?.image_key || id);
         try {
           renderHistory();
         } catch (err) {
@@ -2749,6 +3097,12 @@
 
   try {
     renderHistory();
+    (async () => {
+      await migrateLocalStorageHistory();
+      await loadHistoryEntriesFromDB();
+      await updateHistoryStorageEstimate();
+      renderHistory();
+    })();
   } catch (err) {
     console.warn('[历史记录] 初始化刷新失败:', err.message || err);
   }
@@ -2768,7 +3122,7 @@
         }
         const confirmed = await showConfirm('清空记录', '确认清空所有历史记录吗？清空后将无法恢复');
         if (confirmed) {
-          clearHistory();
+          await clearHistory();
           showToast('记录已清空', 'success');
         }
       });

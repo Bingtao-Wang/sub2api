@@ -158,10 +158,12 @@
                                 </div>
                             </details>
                             <div class="cost-card">
-                                <div>
-                                    <p class="cost-label">预估费用</p>
-                                    <p class="cost-hint">统一价每张 $0.1</p>
-                                </div><span class="cost-value">$0.10</span>
+                                <div class="cost-breakdown">
+                                    <div class="cost-row"><span>已选模型</span><strong>0</strong></div>
+                                    <div class="cost-row"><span>任务总数</span><strong>0</strong></div>
+                                    <div class="cost-row"><span>预估总费用</span><strong class="cost-value">以实际扣费为准</strong></div>
+                                    <p class="cost-hint">价格按当前 API 密钥分组估算，实际扣费以后端成功记录为准。</p>
+                                </div>
                             </div><button type="button" class="btn btn-primary image-submit"><svg
                                     class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"
                                     stroke-width="1.5">
@@ -299,10 +301,12 @@
                                 </div>
                             </details>
                             <div class="cost-card">
-                                <div>
-                                    <p class="cost-label">预估费用</p>
-                                    <p class="cost-hint">统一价每张 $0.1</p>
-                                </div><span class="cost-value">$0.10</span>
+                                <div class="cost-breakdown">
+                                    <div class="cost-row"><span>已选模型</span><strong>0</strong></div>
+                                    <div class="cost-row"><span>任务总数</span><strong>0</strong></div>
+                                    <div class="cost-row"><span>预估总费用</span><strong class="cost-value">以实际扣费为准</strong></div>
+                                    <p class="cost-hint">价格按当前 API 密钥分组估算，实际扣费以后端成功记录为准。</p>
+                                </div>
                             </div><button type="button" class="btn btn-primary image-submit"><svg
                                     class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"
                                     stroke-width="1.5">
@@ -318,7 +322,7 @@
                         aria-labelledby="tab-history" hidden aria-hidden="true">
                         <div class="history-head">
                             <h2>最近生成</h2>
-                            <p>服务器存储空间有限，仅保存近期 5 张，请及时保存！</p>
+                            <p>本地浏览器会尽量保存所有记录和原图；浏览器清理、隐私模式、站点数据清除或存储配额可能导致原图丢失，请及时下载重要图片。</p>
                         </div>
                         <div class="history-list">
                         </div>
@@ -339,6 +343,6 @@
             </section>
         </main>
     </div>
-    <script src="main.js?v=repeat-fix-20260630" defer></script>
+    <script src="main.js?v=prompt-selector-fix-20260703" defer></script>
 </body>
 </html>
