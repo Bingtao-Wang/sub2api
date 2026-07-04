@@ -144,7 +144,7 @@ git branch custom/gallery-backup-$(date +%Y%m%d) custom/gallery
 上游 tag：v0.1.144（tag 提交 41def4ba，upstream/main 另含 VERSION 同步提交 b650bdd6）
 最近上游合并提交：7b362860 Merge remote-tracking branch 'upstream/main' into custom/gallery
 最近本地备份分支：custom/gallery-backup-20260704-180206
-状态：本地 custom/gallery 已合并 upstream/main 并提交 PeterAI 多模型生图改造；领先 origin/custom/gallery 的具体提交数以 `git status --short --branch` 为准
+状态：custom/gallery 已合并 upstream/main、提交 PeterAI 多模型生图改造，并已推送到 origin/custom/gallery
 ```
 
 这表示当前 `custom/gallery` 已合并官方 `v0.1.144` 源码，并保留本 fork 的 GPT-5.5 默认模型、图片画廊、PeterAI 画图页、同站静态页覆盖、多级代理层级、顶栏问候、易支付增强和 PeterAI 多模型生图/严苛计费改造。生产恢复必须同时依赖数据库 dump、Docker volume 备份和 `deploy/.env`，不能只依赖 Git。
@@ -1473,7 +1473,7 @@ sg docker -c 'docker compose -f /home/aihub/Peter_ws/sub2api/deploy/docker-compo
   - PeterAI 多模型改造已提交，具体 HEAD 以 `git log --oneline -3` 为准。
   - 合并前已创建备份分支：`custom/gallery-backup-20260704-180206`。
   - 合并过程无文件冲突；随后恢复了合并前暂存的 PeterAI 多模型生图与维护文档改动。
-  - 当前本地 `custom/gallery` 领先 `origin/custom/gallery`，后续确认后需要推送。
+  - 已推送到 `origin/custom/gallery`。
 - 已构建并部署本次上游同步后的生产镜像：
   - 当前运行镜像：`sub2api-custom:20260704-upstream-v0144-06900a8c1836`。
   - 镜像 ID：`sha256:09e001bce51d39f2892dbe40ad0aa88612b3d5e0db9ea9b81d0b79dbcddb2618`。
