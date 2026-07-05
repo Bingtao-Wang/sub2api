@@ -264,12 +264,12 @@ func (s *APIKeyService) compileAPIKeyIPRules(apiKey *APIKey) {
 }
 
 type ImageGenerationAPIKeyOption struct {
-	ID            int64                                  `json:"id"`
-	Name          string                                 `json:"name"`
-	Key           string                                 `json:"key"`
-	GroupID       int64                                  `json:"group_id"`
-	GroupName     string                                 `json:"group_name"`
-	Models        []string                               `json:"models"`
+	ID            int64                          `json:"id"`
+	Name          string                         `json:"name"`
+	Key           string                         `json:"key"`
+	GroupID       int64                          `json:"group_id"`
+	GroupName     string                         `json:"group_name"`
+	Models        []string                       `json:"models"`
 	PricesByModel map[string]map[string]*float64 `json:"prices_by_model,omitempty"`
 }
 
