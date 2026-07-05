@@ -159,6 +159,9 @@ func TestGalleryServiceCreateAcceptsPNGAndWritesFiles(t *testing.T) {
 	if _, ok := svc.ResolveMediaPath(context.Background(), items[0].ImagePath); !ok {
 		t.Fatalf("ResolveMediaPath(%q) failed", items[0].ImagePath)
 	}
+	if !items[0].Permanent {
+		t.Fatal("created gallery item should be permanent by default")
+	}
 }
 
 func TestGalleryServiceRejectsInvalidImage(t *testing.T) {

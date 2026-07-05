@@ -265,6 +265,7 @@ func (s *GalleryService) prepareCreateItem(userID int64, raw GalleryCreateItemIn
 		ThumbPath:      filepath.ToSlash(filepath.Join("thumbs", datePath, "pending."+thumbExt)),
 		ImageSizeBytes: int64(len(imageBytes)),
 		Status:         GalleryStatusHidden,
+		Permanent:      true,
 		CreatedAt:      s.now(),
 		UpdatedAt:      s.now(),
 	}
