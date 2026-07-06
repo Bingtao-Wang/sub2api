@@ -1482,6 +1482,7 @@ sg docker -c 'docker compose -f /home/aihub/Peter_ws/sub2api/deploy/docker-compo
   - 当前运行镜像：`sub2api-custom:20260706-upstream-v0145-67ef8aa7`。
   - 镜像 ID：`sha256:e37dce4d5a0c81b5058ba2b10847abed7526118f039a0987fb145bd211a1f499`。
   - 仅重建应用容器 `sub2api`，Postgres / Redis 未重建。
+  - 升级后本地备份成功：`/home/aihub/Peter_ws/sub2api-backups/20260706_202729`，Postgres dump `102M`，App data tar.gz `28M`。
   - `deploy/verify-production.sh` 通过。
   - 本机与公网健康检查均返回 `{"status":"ok"}`。
   - 公开画廊接口保留 `permanent:true`，确认画廊默认永久保留策略仍生效。
