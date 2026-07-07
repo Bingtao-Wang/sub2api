@@ -38,6 +38,7 @@
   - [6.3 回滚流程](#63-回滚流程)
   - [6.4 宿主机缺少构建工具时的替代验证](#64-宿主机缺少构建工具时的替代验证)
 - [七、更新记录](#七更新记录)
+  - [2026-07-07](#2026-07-07)
   - [2026-07-06](#2026-07-06)
   - [2026-07-04](#2026-07-04)
   - [2026-07-02](#2026-07-02)
@@ -136,19 +137,19 @@ git branch custom/gallery-backup-$(date +%Y%m%d) custom/gallery
 
 ### 1.4 当前远端差异与灾备优先级
 
-2026-07-06 源码更新检查结果：
+2026-07-07 源码更新检查结果：
 
 ```text
 当前分支：custom/gallery
 当前 HEAD：以 `git rev-parse --short=12 HEAD` 为准
-上游最新：upstream/main 6cea1c35
-上游 tag：v0.1.145（tag 提交 3fa08aa9，upstream/main 另含 VERSION 同步和 gpt-5.6-sol/terra/luna 适配提交）
-最近上游合并提交：67ef8aa7 Merge upstream v0.1.145 into custom gallery
-最近本地备份分支：custom/gallery-backup-20260706-before-v0145
-状态：custom/gallery 已合并 upstream/main，保留 PeterAI 多模型生图、图片画廊永久保留、严格图片计费、GPT-5.5 默认模型、同站静态页覆盖、多级代理层级、顶栏问候和易支付增强；本次部署镜像为 sub2api-custom:20260706-upstream-v0145-67ef8aa7
+上游最新：upstream/main 17b6481f
+上游 tag：v0.1.146（upstream/main 当前为 v0.1.146-13-g17b6481f）
+最近上游合并提交：fc9af029 Merge remote-tracking branch 'upstream/main' into custom/gallery
+最近本地备份分支：custom/gallery-backup-20260707-before-v0146
+状态：custom/gallery 已合并 upstream/main，保留 PeterAI 多模型生图、图片画廊永久保留、严格图片计费、GPT-5.5 默认模型、同站静态页覆盖、多级代理层级、顶栏问候和易支付增强；本次部署镜像为 sub2api-custom:20260707-upstream-v0146-fc9af029
 ```
 
-这表示当前 `custom/gallery` 已合并官方 `v0.1.145` 源码，并保留本 fork 的 GPT-5.5 默认模型、图片画廊、PeterAI 画图页、同站静态页覆盖、多级代理层级、顶栏问候、易支付增强、PeterAI 多模型生图/严苛计费改造和画廊默认永久保留策略。生产恢复必须同时依赖数据库 dump、Docker volume 备份和 `deploy/.env`，不能只依赖 Git。
+这表示当前 `custom/gallery` 已合并官方 `v0.1.146` 源码，并保留本 fork 的 GPT-5.5 默认模型、图片画廊、PeterAI 画图页、同站静态页覆盖、多级代理层级、顶栏问候、易支付增强、PeterAI 多模型生图/严苛计费改造和画廊默认永久保留策略。生产恢复必须同时依赖数据库 dump、Docker volume 备份和 `deploy/.env`，不能只依赖 Git。
 
 已创建离线灾备：
 
@@ -204,7 +205,7 @@ git -C /home/aihub/Peter_ws/sub2api log --oneline --left-right origin/custom/gal
 当前运行约定：
 
 - Compose 项目名：`peter-sub2api`
-- 应用镜像：`sub2api-custom:20260706-upstream-v0145-67ef8aa7`
+- 应用镜像：`sub2api-custom:20260707-upstream-v0146-fc9af029`
 - 本机监听：`127.0.0.1:18080`
 - 容器服务端口：`8080`
 - Postgres：Compose 内部服务 `postgres`
@@ -1464,6 +1465,34 @@ sg docker -c 'docker compose -f /home/aihub/Peter_ws/sub2api/deploy/docker-compo
 如果要进一步增强源码级验证，可以在 CI 中跑更完整的 `go test ./...`、`pnpm vitest`、`pnpm build`。本机默认使用 Docker 测试脚本和运行态验收。
 
 ## 七、更新记录
+
+### 2026-07-07
+
+- 已按本手册流程把 `custom/gallery` 合并到官方最新源码：
+  - 上游 tag：`v0.1.146`。
+  - 上游 HEAD：`17b6481f`。
+  - 本次合并提交：`fc9af029 Merge remote-tracking branch upstream/main into custom/gallery`。
+  - 合并前已创建备份分支：`custom/gallery-backup-20260707-before-v0146`。
+  - 合并过程无文件冲突，保留 PeterAI 多模型生图、严格图片计费、画廊永久保留、多级代理层级、顶栏问候和易支付增强。
+- 已验证：
+  - Docker Go 1.26.4 环境运行 `go test ./... -count=1` 通过。
+  - `golangci-lint run ./... --timeout=8m` 通过，结果 `0 issues`。
+  - `git diff --check` 通过。
+  - Docker 构建阶段前端 `pnpm run build` 通过，后端 `go build -tags embed ./cmd/server` 通过。
+- 已构建并部署生产镜像：
+  - 当前运行镜像：`sub2api-custom:20260707-upstream-v0146-fc9af029`。
+  - 镜像 ID：`sha256:ea7871671041a7268d962c6e5928cd90d24d4de658c46279e0cb9c11d3517eaa`。
+  - 仅重建应用容器 `sub2api`，Postgres / Redis 未重建。
+  - 升级后本地备份成功：`/home/aihub/Peter_ws/sub2api-backups/20260707_162743`，Postgres dump `105M`，App data tar.gz `26M`。
+  - `deploy/verify-production.sh` 通过。
+  - 本机与 `api.peterai.cc.cd`、`api.jackai.cc.cd` 公网健康检查均返回 `{"status":"ok"}`。
+  - 公开画廊接口保留 `permanent:true`，确认画廊默认永久保留策略仍生效。
+- 上游重点变更已纳入：
+  - 官方版本号升级到 `0.1.146`。
+  - 账号 header override 与 OpenAI Antigravity 401 self-heal 相关修复。
+  - gateway request-body parse 错误可观测性增强。
+  - websearch emulation history block 过滤修复。
+  - Grok composer image bridge、Redis scan index hardening、OpenAI compact usage SSE detection 修复。
 
 ### 2026-07-06
 
