@@ -147,7 +147,7 @@ git branch custom/gallery-backup-$(date +%Y%m%d) custom/gallery
 上游 tag：v0.1.151（upstream/main 当前为 v0.1.151-17-ge316ebf5）
 最近上游合并提交：以 `git log -1 --oneline custom/gallery` 为准
 最近本地备份分支：custom/gallery-backup-20260710-before-v0151
-状态：custom/gallery 已合并 upstream/main，保留 PeterAI 多模型生图、图片画廊永久保留、严格图片计费、GPT-5.5 默认模型、同站静态页覆盖、多级代理层级、顶栏问候、易支付增强和使用教程；生产已切换到 `sub2api-custom:20260710-upstream-v0151-cc2e0fad`。
+状态：custom/gallery 已合并 upstream/main，保留 PeterAI 多模型生图、图片画廊永久保留、严格图片计费、GPT-5.5 默认模型、同站静态页覆盖、多级代理层级、顶栏问候、易支付增强和使用教程；生产已切换到 `sub2api-custom:20260710-upstream-v0151-92bce245`。
 ```
 
 这表示当前 `custom/gallery` 已合并官方 `v0.1.151` 及其后续 17 个主分支提交，并保留本 fork 的 GPT-5.5 默认模型、图片画廊、PeterAI 画图页、同站静态页覆盖、多级代理层级、顶栏问候、易支付增强、使用教程、PeterAI 多模型生图/严苛计费改造和画廊默认永久保留策略。生产恢复必须同时依赖数据库 dump、Docker volume 备份和 `deploy/.env`，不能只依赖 Git。
@@ -206,7 +206,7 @@ git -C /home/aihub/Peter_ws/sub2api log --oneline --left-right origin/custom/gal
 当前运行约定：
 
 - Compose 项目名：`peter-sub2api`
-- 应用镜像：`sub2api-custom:20260710-upstream-v0151-cc2e0fad`
+- 应用镜像：`sub2api-custom:20260710-upstream-v0151-92bce245`
 - 本机监听：`127.0.0.1:18080`
 - 容器服务端口：`8080`
 - Postgres：Compose 内部服务 `postgres`
@@ -1492,13 +1492,14 @@ sg docker -c 'docker compose -f /home/aihub/Peter_ws/sub2api/deploy/docker-compo
   - 前端 Vitest 全量测试 146 个文件、936 项用例全部通过，包含 GPT-5.5 配置、UseKeyModal、同站嵌入、代理树、顶栏问候和自定义功能 i18n 完整性回归覆盖。
   - Docker Go 1.26.5 环境运行 `go test ./... -count=1` 全部通过。
 - 已构建并部署生产镜像：
-  - 当前运行镜像：`sub2api-custom:20260710-upstream-v0151-cc2e0fad`。
-  - 镜像 ID：`sha256:ea99650e44987ab4be0287c14349391dee3a80ce4fe16f70c5879d552fb9ef4b`。
+  - 当前运行镜像：`sub2api-custom:20260710-upstream-v0151-92bce245`。
+  - 镜像 ID：`sha256:ecce9121da182857b2db08f43d92d67fd32260c97538ab8ca263eb4157643ade`。
+  - 自定义功能 i18n 热修提交：`92bce245 fix: restore custom feature translations`。
   - 发布前本地备份成功：`/home/aihub/Peter_ws/sub2api-backups/20260710_233345`，Postgres dump `112M`，App data tar.gz `25M`，校验和通过且 `pg_restore` 可读取。
   - `deploy/.env` 已指向新镜像，仅重建 `sub2api` 应用容器，Postgres / Redis 保持原容器运行。
   - 本机与公网 `/health` 均返回 `{"status":"ok"}`，`deploy/verify-production.sh` 通过。
   - 公网 PeterAI 画图页链路、图片价格、静态文件 hash 和 `single_dollar_forEach = 0` 全部通过。
-  - 公网前端资源已包含中文夜深关怀文案，不再直接显示 `common.headerGreeting.lateNight`。
+  - 公网前端 locale 资源已验证包含“图片画廊”、“代理层级”、代理层级描述、使用教程描述、订单查询地址和夜深关怀文案。
 
 - 已继续按本手册流程把 `custom/gallery` 合并到官方最新源码：
   - 上游 tag：`v0.1.150`。
