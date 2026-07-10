@@ -143,14 +143,14 @@ git branch custom/gallery-backup-$(date +%Y%m%d) custom/gallery
 ```text
 当前分支：custom/gallery
 当前 HEAD：以 `git rev-parse --short=12 HEAD` 为准
-上游最新：upstream/main 12d811bd7657
-上游 tag：v0.1.149（upstream/main 当前为 v0.1.149-1-g12d811bd）
+上游最新：upstream/main 9a2f11b4
+上游 tag：v0.1.150（upstream/main 当前为 v0.1.150-1-g9a2f11b4）
 最近上游合并提交：以 `git log -1 --oneline custom/gallery` 为准
-最近本地备份分支：custom/gallery-backup-20260710-before-v0149
+最近本地备份分支：custom/gallery-backup-20260710-before-v0150
 状态：custom/gallery 已合并 upstream/main，保留 PeterAI 多模型生图、图片画廊永久保留、严格图片计费、GPT-5.5 默认模型、同站静态页覆盖、多级代理层级、顶栏问候、易支付增强和使用教程；本次仅完成源码同步，生产镜像需按发布流程另行构建切换。
 ```
 
-这表示当前 `custom/gallery` 已合并官方 `v0.1.149` 源码，并保留本 fork 的 GPT-5.5 默认模型、图片画廊、PeterAI 画图页、同站静态页覆盖、多级代理层级、顶栏问候、易支付增强、使用教程、PeterAI 多模型生图/严苛计费改造和画廊默认永久保留策略。生产恢复必须同时依赖数据库 dump、Docker volume 备份和 `deploy/.env`，不能只依赖 Git。
+这表示当前 `custom/gallery` 已合并官方 `v0.1.150` 源码，并保留本 fork 的 GPT-5.5 默认模型、图片画廊、PeterAI 画图页、同站静态页覆盖、多级代理层级、顶栏问候、易支付增强、使用教程、PeterAI 多模型生图/严苛计费改造和画廊默认永久保留策略。生产恢复必须同时依赖数据库 dump、Docker volume 备份和 `deploy/.env`，不能只依赖 Git。
 
 已创建离线灾备：
 
@@ -1468,6 +1468,18 @@ sg docker -c 'docker compose -f /home/aihub/Peter_ws/sub2api/deploy/docker-compo
 ## 七、更新记录
 
 ### 2026-07-10
+
+- 已继续按本手册流程把 `custom/gallery` 合并到官方最新源码：
+  - 上游 tag：`v0.1.150`。
+  - 上游 HEAD：`9a2f11b4`。
+  - 本次合并提交：`e787e5ab Merge remote-tracking branch upstream/main into custom/gallery`。
+  - 合并前已创建备份分支：`custom/gallery-backup-20260710-before-v0150`。
+  - 合并过程无文件冲突，保留 PeterAI 多模型生图、严格图片计费、画廊永久保留、多级代理层级、顶栏问候、易支付增强和使用教程。
+- 已验证：
+  - `npm -C frontend run typecheck` 通过。
+  - `npm -C frontend run build` 通过。
+  - Docker Go 1.26.5 环境运行 `go test ./...` 通过。
+- 本次仅完成源码同步和验证，未切换生产镜像。
 
 - 已按本手册流程把 `custom/gallery` 合并到官方最新源码：
   - 上游 tag：`v0.1.149`。
