@@ -143,14 +143,14 @@ git branch custom/gallery-backup-$(date +%Y%m%d) custom/gallery
 ```text
 当前分支：custom/gallery
 当前 HEAD：以 `git rev-parse --short=12 HEAD` 为准
-上游最新：upstream/main 9a2f11b4
-上游 tag：v0.1.150（upstream/main 当前为 v0.1.150-1-g9a2f11b4）
+上游最新：upstream/main e316ebf52838
+上游 tag：v0.1.151（upstream/main 当前为 v0.1.151-17-ge316ebf5）
 最近上游合并提交：以 `git log -1 --oneline custom/gallery` 为准
-最近本地备份分支：custom/gallery-backup-20260710-before-v0150
-状态：custom/gallery 已合并 upstream/main，保留 PeterAI 多模型生图、图片画廊永久保留、严格图片计费、GPT-5.5 默认模型、同站静态页覆盖、多级代理层级、顶栏问候、易支付增强和使用教程；生产已切换到 `sub2api-custom:20260710-upstream-v0150-062c2de6`。
+最近本地备份分支：custom/gallery-backup-20260710-before-v0151
+状态：custom/gallery 已合并 upstream/main，保留 PeterAI 多模型生图、图片画廊永久保留、严格图片计费、GPT-5.5 默认模型、同站静态页覆盖、多级代理层级、顶栏问候、易支付增强和使用教程；源码已验证，生产仍运行 `sub2api-custom:20260710-upstream-v0150-062c2de6`，本次未切换生产镜像。
 ```
 
-这表示当前 `custom/gallery` 已合并官方 `v0.1.150` 源码，并保留本 fork 的 GPT-5.5 默认模型、图片画廊、PeterAI 画图页、同站静态页覆盖、多级代理层级、顶栏问候、易支付增强、使用教程、PeterAI 多模型生图/严苛计费改造和画廊默认永久保留策略。生产恢复必须同时依赖数据库 dump、Docker volume 备份和 `deploy/.env`，不能只依赖 Git。
+这表示当前 `custom/gallery` 已合并官方 `v0.1.151` 及其后续 17 个主分支提交，并保留本 fork 的 GPT-5.5 默认模型、图片画廊、PeterAI 画图页、同站静态页覆盖、多级代理层级、顶栏问候、易支付增强、使用教程、PeterAI 多模型生图/严苛计费改造和画廊默认永久保留策略。生产恢复必须同时依赖数据库 dump、Docker volume 备份和 `deploy/.env`，不能只依赖 Git。
 
 已创建离线灾备：
 
@@ -1468,6 +1468,25 @@ sg docker -c 'docker compose -f /home/aihub/Peter_ws/sub2api/deploy/docker-compo
 ## 七、更新记录
 
 ### 2026-07-10
+
+- 已按本手册流程把 `custom/gallery` 合并到官方最新源码：
+  - 上游 tag：`v0.1.151`。
+  - 上游 HEAD：`e316ebf52838`（`v0.1.151-17-ge316ebf5`）。
+  - 本次合并提交：`b1fe67d5 Merge remote-tracking branch 'upstream/main' into custom/gallery`。
+  - 合并前已创建备份分支：`custom/gallery-backup-20260710-before-v0151`。
+  - 合并过程无文件冲突，保留 PeterAI 多模型生图、严格图片计费、画廊永久保留、GPT-5.5 默认模型、多级代理层级、顶栏问候、易支付增强和使用教程。
+  - 已纳入上游 Codex MCP/tool bridge、GPT-5.6 计费完整性、用户级 Fast/Flex 策略、Codex 身份配对、Anthropic cache usage 和迁移 `173_allow_cyber_blocked_usage_request_type.sql`。
+- 已修复顶栏关怀问候直接显示 `common.headerGreeting.lateNight` 的回归：
+  - 原因是上游 i18n 目录化后，`AppHeader.vue` 引用的 `common.headerGreeting.*` 未迁移到新的 `locales/{zh,en}/common.ts`。
+  - 已恢复中英文六个时段文案；中文夜深文案为 `{name} 夜深了，辛苦了。喝口水，早点休息！加油！`。
+  - 新增 `headerGreetingLocales.spec.ts`，防止后续同步上游时再次丢失文案。
+- 已验证：
+  - `npm -C frontend run typecheck -- --pretty false` 通过。
+  - `npm -C frontend run build` 通过。
+  - PeterAI `deploy/static/image-generator/main.js` 语法检查通过。
+  - 前端 Vitest 全量测试 145 个文件、934 项用例全部通过，包含 GPT-5.5 配置、UseKeyModal、同站嵌入、代理树和顶栏问候回归覆盖。
+  - Docker Go 1.26.5 环境运行 `go test ./... -count=1` 全部通过。
+- 本次只完成源码同步、关怀问候修复和验证，尚未构建或切换新生产镜像。
 
 - 已继续按本手册流程把 `custom/gallery` 合并到官方最新源码：
   - 上游 tag：`v0.1.150`。
