@@ -228,11 +228,11 @@ func (r *galleryRepository) IsVisibleMediaPath(ctx context.Context, relPath stri
 	return exists, nil
 }
 
-type rowScanner interface {
+type galleryRowScanner interface {
 	Scan(dest ...any) error
 }
 
-func scanGalleryRow(row rowScanner) (*service.GalleryItem, error) {
+func scanGalleryRow(row galleryRowScanner) (*service.GalleryItem, error) {
 	var item service.GalleryItem
 	var deletedAt sql.NullTime
 	if err := row.Scan(

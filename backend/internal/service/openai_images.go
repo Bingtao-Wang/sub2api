@@ -471,7 +471,14 @@ func IsOpenAIImageModelAlias(model string) bool {
 }
 
 func isOpenAIImageGenerationModel(model string) bool {
-	return IsOpenAIImageModelAlias(model)
+	return IsOpenAIImageModelAlias(model) || isGrokImageGenerationModel(model)
+}
+
+func isGrokImageGenerationModel(model string) bool {
+	model = strings.ToLower(strings.TrimSpace(model))
+	return model == "grok-imagine" ||
+		model == "grok-imagine-edit" ||
+		strings.HasPrefix(model, "grok-imagine-image")
 }
 
 func validateOpenAIImagesModel(model string) error {
