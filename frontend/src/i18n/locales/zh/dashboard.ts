@@ -385,6 +385,77 @@ export default {
     },
   },
 
+  tutorial: {
+    title: '使用教程',
+    description: '按照客户端、模型和线路生成可直接使用的接入配置',
+    channel: '渠道',
+    model: '模型',
+    client: '客户端',
+    apiKey: 'API Key',
+    openaiOfficial: 'OpenAI 官渠',
+    maxOfficial: 'Max 官渠',
+    clientDescriptions: {
+      codex: '适合 OpenAI / GPT 模型的官方命令行接入',
+      claude: '适合 Claude / Anthropic 模型的官方命令行接入'
+    },
+    endpointTitle: '线路选择',
+    defaultEndpoint: '默认线路',
+    defaultEndpointDescription: '系统默认 API 地址',
+    customEndpoint: '自定义线路 {n}',
+    noAvailableKey: '暂无可用 OpenAI 密钥',
+    noAvailableClaudeKey: '暂无可用 Claude 密钥',
+    emptyTitle: '暂无可用 OpenAI API Key',
+    emptyDescription: '请先创建一个已分配到 OpenAI 分组、状态为启用的 API Key，然后回到这里生成 Codex 配置。',
+    emptyClaudeTitle: '暂无可用 Claude API Key',
+    emptyClaudeDescription: '请先创建一个已分配到 Claude/Anthropic 分组、状态为启用的 API Key，然后回到这里生成 Claude Code 配置。',
+    loadFailed: '加载使用教程失败',
+    configTomlHint: '请确保以下内容位于 config.toml 文件的开头部分',
+    claudeSettingsHint: '请将以下内容写入 settings.json 并保存',
+    updateClaudeCliHint: '如果本机已经安装过 Claude Code CLI，执行下面命令即可更新到最新版本。',
+    vscodeClaudeHint: 'CLI 配置保存后，VS Code 扩展会复用同一套 Claude Code 设置；这是可选入口，不影响上面的终端用法。',
+    vscodeClaudeSteps: '1. 打开命令面板：Windows / Linux 按 Ctrl+Shift+P，macOS 按 Cmd+Shift+P。\n2. 输入 Claude Code，选择 Open in New Tab 或 Start Claude Code。\n3. 也可以直接打开 VS Code 集成终端，执行 claude。',
+    optionalIntegration: '可选集成',
+    optionalVsCodeTitle: '在 VS Code 中使用 Claude Code',
+    vscodeGuide: {
+      installExtension: '安装 Claude Code 扩展',
+      openProject: '打开当前项目目录',
+      startClaude: '从扩展或集成终端启动'
+    },
+    summary: {
+      title: '当前配置',
+      client: '接入方式',
+      model: '模型',
+      apiKey: 'API Key',
+      endpoint: 'Base URL',
+      configPath: '配置文件'
+    },
+    nodeInstall: {
+      chooseMethod: '按你当前选择的系统执行下面任一安装方式；如果命令不可用，可以点击官方安装页面下载安装包。',
+      windowsHint: 'Windows 推荐使用 PowerShell 执行。若提示找不到 winget，请改用下方官方安装页面下载安装包。',
+      macosHint: 'macOS 用户如果已安装 Homebrew，可以使用此命令。',
+      linuxHint: 'Ubuntu / Debian 用户可以使用 NodeSource LTS 源安装。',
+      verify: '安装完成后，关闭并重新打开终端，然后验证版本：',
+      officialDownload: '打开 Node.js 官方安装页面'
+    },
+    steps: {
+      node: '安装或更新 Node.js（v18.0 或更高版本）。',
+      installCodex: '在终端中执行下列命令，安装 Codex。',
+      installClaude: '在终端中执行下列命令，安装 Claude Code。',
+      installOrUpdateClaude: '安装或更新 Claude Code CLI。',
+      verifyCodex: '运行以下命令验证安装。若有版本号输出，则表示安装成功。',
+      verifyClaude: '运行以下命令验证安装。若有版本号输出，则表示安装成功。',
+      createConfigDir: '创建并打开配置目录。如果 .codex 目录不存在，需要先创建。',
+      createClaudeConfigDir: '创建并打开配置目录。如果 .claude 目录不存在，需要先创建。',
+      openConfigFile: '然后打开配置文件：',
+      writeConfig: '编辑配置文件，将以下内容写入并保存。',
+      writeClaudeConfig: '编辑 Claude Code 配置文件，将以下内容写入并保存。',
+      updateClaudeCli: '更新 Claude Code CLI。',
+      useClaudeInVsCode: '在 VS Code 中使用 Claude Code。',
+      startCodex: '启动 Codex 并开始使用。',
+      startClaude: '启动 Claude Code 并开始使用。'
+    }
+  },
+
   // Shared keys for channel monitor (admin + user views)
   monitorCommon: {
     status: {
@@ -543,6 +614,38 @@ export default {
       line2: '被邀请用户充值后，你可获得 {rate} 的返利额度。',
       line3: '返利额度可随时转入账户余额。',
       line4: '新产生的返利需要经过冻结期后才能提现。'
+    },
+    hierarchy: {
+      description: '查看你的代理团队、下级充值和返利情况',
+      noAccessTitle: '暂未开通代理团队权限',
+      noAccessDescription: '该页面仅对管理员授权的代理账户开放。',
+      startAt: '开始日期',
+      endAt: '结束日期',
+      maxDepth: '层级深度',
+      nodeSearch: '团队内搜索',
+      nodeSearchPlaceholder: '邮箱、用户名、用户 ID、邀请码',
+      nodeCount: '节点数',
+      teamSize: '团队人数',
+      teamRecharge: '团队充值',
+      selfRecharge: '本人充值',
+      rebateAmount: '已获返利',
+      user: '用户',
+      depth: '层级',
+      parent: '上级',
+      affCode: '邀请码',
+      effectiveRate: '有效比例',
+      directInvites: '直属人数',
+      me: '我 / 当前代理',
+      meShort: '我',
+      directDownline: '直属下级',
+      nthDownline: '{depth} 级下级',
+      emptyNodes: '暂无匹配节点',
+      errors: {
+        loadAccessFailed: '加载代理权限失败',
+        loadFailed: '加载代理团队失败',
+        AFFILIATE_AGENT_ACCESS_DENIED: '你暂未开通代理团队权限',
+        AFFILIATE_DISABLED: '邀请返利功能未启用'
+      }
     }
   },
 

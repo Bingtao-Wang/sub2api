@@ -587,6 +587,8 @@ export default {
         validationEasyPayCustomMethodPrefixReserved: 'Custom EasyPay payment types cannot start with alipay or wxpay',
         validationEasyPayCustomMethodDuplicate: 'Custom EasyPay payment types must be unique',
         field_apiBase: 'API Base URL',
+        field_queryUrl: 'Order query URL',
+        field_easypayQueryUrlHint: 'Optional. Use this when the EasyPay site exposes order lookup outside /api.php, for example https://www.ezfpy.cn/api/findorder.',
         field_notifyUrl: 'Notify URL',
         field_returnUrl: 'Return URL',
         callbackBaseUrl: 'Callback Base URL',

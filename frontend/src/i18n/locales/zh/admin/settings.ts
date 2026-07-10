@@ -583,6 +583,8 @@ export default {
         validationEasyPayCustomMethodPrefixReserved: '易支付自定义支付方式不能以 alipay 或 wxpay 开头',
         validationEasyPayCustomMethodDuplicate: '易支付自定义支付方式不能重复',
         field_apiBase: 'API 基础地址',
+        field_queryUrl: '订单查询地址',
+        field_easypayQueryUrlHint: '可选。易支付站点查单接口不是 /api.php 时填写，例如 https://www.ezfpy.cn/api/findorder。',
         field_notifyUrl: '异步通知地址',
         field_returnUrl: '同步跳转地址',
         callbackBaseUrl: '回调基础地址',

@@ -380,6 +380,77 @@ export default {
     },
   },
 
+  tutorial: {
+    title: 'Tutorial',
+    description: 'Generate ready-to-use client configuration by client, model, and endpoint',
+    channel: 'Channel',
+    model: 'Model',
+    client: 'Client',
+    apiKey: 'API Key',
+    openaiOfficial: 'OpenAI Official',
+    maxOfficial: 'Max Official',
+    clientDescriptions: {
+      codex: 'Official CLI access for OpenAI / GPT models',
+      claude: 'Official CLI access for Claude / Anthropic models'
+    },
+    endpointTitle: 'Endpoint',
+    defaultEndpoint: 'Default endpoint',
+    defaultEndpointDescription: 'System default API endpoint',
+    customEndpoint: 'Custom endpoint {n}',
+    noAvailableKey: 'No available OpenAI key',
+    noAvailableClaudeKey: 'No available Claude key',
+    emptyTitle: 'No available OpenAI API Key',
+    emptyDescription: 'Create an enabled API Key assigned to an OpenAI group, then return here to generate the Codex configuration.',
+    emptyClaudeTitle: 'No available Claude API Key',
+    emptyClaudeDescription: 'Create an enabled API Key assigned to a Claude/Anthropic group, then return here to generate the Claude Code configuration.',
+    loadFailed: 'Failed to load tutorial',
+    configTomlHint: 'Make sure the following content is at the beginning of config.toml',
+    claudeSettingsHint: 'Paste the following content into settings.json and save it',
+    updateClaudeCliHint: 'If Claude Code CLI is already installed on this machine, run the command below to update it to the latest version.',
+    vscodeClaudeHint: 'After the CLI config is saved, the VS Code extension reuses the same Claude Code settings. This is optional and does not affect terminal usage above.',
+    vscodeClaudeSteps: '1. Open Command Palette: Ctrl+Shift+P on Windows / Linux, or Cmd+Shift+P on macOS.\n2. Type Claude Code, then choose Open in New Tab or Start Claude Code.\n3. You can also open the VS Code integrated terminal and run claude.',
+    optionalIntegration: 'Optional integration',
+    optionalVsCodeTitle: 'Use Claude Code in VS Code',
+    vscodeGuide: {
+      installExtension: 'Install the Claude Code extension',
+      openProject: 'Open the current project folder',
+      startClaude: 'Start from the extension or terminal'
+    },
+    summary: {
+      title: 'Current configuration',
+      client: 'Access mode',
+      model: 'Model',
+      apiKey: 'API Key',
+      endpoint: 'Base URL',
+      configPath: 'Config file'
+    },
+    nodeInstall: {
+      chooseMethod: 'Run one of the install methods for your selected system. If the command is unavailable, use the official installer page below.',
+      windowsHint: 'Recommended for Windows PowerShell. If winget is unavailable, use the official installer page below.',
+      macosHint: 'For macOS users with Homebrew installed.',
+      linuxHint: 'For Ubuntu / Debian users through the NodeSource LTS repository.',
+      verify: 'After installation, close and reopen your terminal, then verify the versions:',
+      officialDownload: 'Open the official Node.js installer page'
+    },
+    steps: {
+      node: 'Install or update Node.js (v18.0 or later).',
+      installCodex: 'Run the following command in your terminal to install Codex.',
+      installClaude: 'Run the following command in your terminal to install Claude Code.',
+      installOrUpdateClaude: 'Install or update Claude Code CLI.',
+      verifyCodex: 'Run this command to verify installation. A version output means it installed successfully.',
+      verifyClaude: 'Run this command to verify installation. A version output means it installed successfully.',
+      createConfigDir: 'Create and open the config directory. If the .codex directory does not exist, create it first.',
+      createClaudeConfigDir: 'Create and open the config directory. If the .claude directory does not exist, create it first.',
+      openConfigFile: 'Then open the config file:',
+      writeConfig: 'Edit the config files, paste the following content, and save.',
+      writeClaudeConfig: 'Edit the Claude Code config file, paste the following content, and save.',
+      updateClaudeCli: 'Update Claude Code CLI.',
+      useClaudeInVsCode: 'Use Claude Code in VS Code.',
+      startCodex: 'Start Codex and begin using it.',
+      startClaude: 'Start Claude Code and begin using it.'
+    }
+  },
+
   // Shared keys for channel monitor (admin + user views)
   monitorCommon: {
     status: {
@@ -538,6 +609,38 @@ export default {
       line2: 'When invitees recharge, you receive {rate} of the recharge as rebate quota.',
       line3: 'Transfer rebate quota to balance at any time.',
       line4: 'Newly earned rebates may have a waiting period before they can be transferred.'
+    },
+    hierarchy: {
+      description: 'View your agent team, downstream top-ups, and rebates',
+      noAccessTitle: 'Agent team access is not enabled',
+      noAccessDescription: 'This page is only available to agent accounts enabled by an administrator.',
+      startAt: 'Start Date',
+      endAt: 'End Date',
+      maxDepth: 'Max Depth',
+      nodeSearch: 'Team Search',
+      nodeSearchPlaceholder: 'Email, username, user ID, or invite code',
+      nodeCount: 'Nodes',
+      teamSize: 'Team Size',
+      teamRecharge: 'Team Top-ups',
+      selfRecharge: 'Self Top-ups',
+      rebateAmount: 'Rebates Earned',
+      user: 'User',
+      depth: 'Level',
+      parent: 'Parent',
+      affCode: 'Invite Code',
+      effectiveRate: 'Effective Rate',
+      directInvites: 'Direct Invites',
+      me: 'Me / Current Agent',
+      meShort: 'Me',
+      directDownline: 'Direct Downline',
+      nthDownline: 'Level {depth} Downline',
+      emptyNodes: 'No matching nodes',
+      errors: {
+        loadAccessFailed: 'Failed to load agent access',
+        loadFailed: 'Failed to load agent team',
+        AFFILIATE_AGENT_ACCESS_DENIED: 'Agent team access is not enabled for your account',
+        AFFILIATE_DISABLED: 'Affiliate rebates are disabled'
+      }
     }
   },
 
