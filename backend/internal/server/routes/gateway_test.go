@@ -83,6 +83,39 @@ func TestGatewayRoutesOpenAIImagesPathsAreRegistered(t *testing.T) {
 	}
 }
 
+func TestGatewayRoutesOpenAIManagedMediaPathsAreRegistered(t *testing.T) {
+	router := newGatewayRoutesTestRouter(service.PlatformOpenAI)
+	tests := []struct {
+		method string
+		path   string
+		body   string
+	}{
+		{http.MethodPost, "/v1/audio/speech", `{"model":"gpt-4o-mini-tts","input":"hello"}`},
+		{http.MethodPost, "/v1/contents/generations/tasks", `{"model":"doubao-seedance","content":[{"type":"text","text":"waves"}]}`},
+		{http.MethodGet, "/v1/contents/generations/tasks/task-123", ""},
+	}
+	for _, tc := range tests {
+		req := httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		require.NotEqual(t, http.StatusNotFound, w.Code, "method=%s path=%s", tc.method, tc.path)
+		require.NotContains(t, w.Body.String(), "not supported for this platform")
+	}
+}
+
+func TestGatewayRoutesManagedMediaRejectsNonOpenAIPlatform(t *testing.T) {
+	router := newGatewayRoutesTestRouter(service.PlatformAnthropic)
+	for _, path := range []string{"/v1/audio/speech", "/v1/contents/generations/tasks"} {
+		req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{"model":"media"}`))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		require.Equal(t, http.StatusNotFound, w.Code)
+		require.Contains(t, w.Body.String(), "not supported for this platform")
+	}
+}
+
 func TestGatewayRoutesGrokImagesAndVideosPathsAreRegistered(t *testing.T) {
 	router := newGatewayRoutesTestRouter(service.PlatformGrok)
 

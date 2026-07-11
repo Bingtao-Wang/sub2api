@@ -85,6 +85,8 @@ type OpenAIEndpointCapability string
 const (
 	OpenAIEndpointCapabilityChatCompletions OpenAIEndpointCapability = "chat_completions"
 	OpenAIEndpointCapabilityEmbeddings      OpenAIEndpointCapability = "embeddings"
+	OpenAIEndpointCapabilityAudioSpeech     OpenAIEndpointCapability = "audio_speech"
+	OpenAIEndpointCapabilitySeedance        OpenAIEndpointCapability = "seedance"
 )
 
 const openAIEndpointCapabilitiesCredentialKey = "openai_capabilities"
@@ -1364,6 +1366,12 @@ func (a *Account) SupportsOpenAIEndpointCapability(capability OpenAIEndpointCapa
 		if a.Type != AccountTypeAPIKey {
 			return false
 		}
+	case OpenAIEndpointCapabilityAudioSpeech, OpenAIEndpointCapabilitySeedance:
+		if a.Type != AccountTypeAPIKey {
+			return false
+		}
+		configured, found := a.openAIEndpointCapabilitySet()
+		return found && configured[string(capability)]
 	default:
 		return false
 	}

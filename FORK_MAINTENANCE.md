@@ -91,6 +91,7 @@ git push origin custom/gallery
 | GPT-5.5 默认模型 | Codex `model` / `review_model` 默认 `gpt-5.5`；白名单、教程、价格都可识别 | `frontend/src/utils/clientConfig.ts`、`UseKeyModal.vue`、`UsageTutorialView.vue`、`useModelWhitelist.ts`、模型价格 JSON |
 | PeterAI 多模型生图 | 同 Key/同分组多选模型；任务独立 `n:1`；最多 4 并发；可分模型提示词 | `deploy/static/image-generator/` |
 | PeterAI 独立画布 | 外部 Canvas 服务和源码不并入 Sub2API；菜单、iframe、认证参数与 CSP 不能回归 | `settings.custom_menu_items`、`CustomPageView.vue`、外部 `peterai-canvas` fork |
+| PeterAI 托管媒体 | Audio/Seedance 只调度显式能力 APIKey 账号；无明确价格 fail-closed；创建请求进入站内 usage 和扣费 | `openai_managed_media.go`、`gateway.go`、账号 `openai_capabilities` |
 | 图片画廊 | 可发布/下载/管理；默认永久保留；原图尽量不降质 | `backend/migrations/150_image_gallery_items.sql`、`gallery*.go`、`GalleryView.vue` |
 | 图片计费 | 价格来自 `prices_by_model`；前端不写死；只有真实图片输出才计费 | `api_key_service.go`、`billing_service.go`、`openai_images*.go` |
 | Images failover | 网络错误、无图、可切换的上游拒绝会换账号；内容安全/参数错误不盲目重试 | `openai_images.go`、`openai_images_responses.go` |
@@ -187,6 +188,7 @@ GET    /api/v1/gallery/media/*path
 
 ```text
 /home/aihub/Peter_ws/peterai-canvas
+公开源码：https://github.com/Bingtao-Wang/PeterAI_canvas
 生产分支：custom/peterai
 上游：    https://github.com/basketikun/infinite-canvas.git
 公网：    https://canvas.peterai.cc.cd
@@ -216,7 +218,22 @@ curl -fsS https://api.peterai.cc.cd/custom/51be877493a8929d \
   | grep -q 'canvas.peterai.cc.cd/canvas'
 ```
 
-Canvas 自动导入非图片模型依赖管理设置 `available_channels_enabled=true`；关闭时 `/api/v1/channels/available` 会按设计返回空数组。当前 Sub2API 真实网关只支持 Models、Responses、Images 和 Grok 视频创建/轮询，尚无 Audio Speech、Seedance tasks、视频 content 路由；不得在验收中把 Nginx 白名单条目误当成后端已实现能力。
+Canvas 自动导入非图片模型依赖管理设置 `available_channels_enabled=true`；关闭时 `/api/v1/channels/available` 会按设计返回空数组。Sub2API 真实网关除 Models、Responses、Images 和 Grok 视频外，还提供：
+
+```text
+POST /v1/audio/speech
+POST /v1/contents/generations/tasks
+GET  /v1/contents/generations/tasks/:task_id
+```
+
+这两个托管媒体能力采用 fail-closed：OpenAI APIKey 账号必须在后台显式勾选 `audio_speech` / `seedance`，Audio 模型必须有独立按次默认价格，Seedance 必须有渠道按次分辨率价格或分组视频价格；自动时长只能走按次价，不能按默认秒数猜测扣费。普通 Codex 账号、未定价模型和 OAuth 账号不得进入这两个调度池。生产启用步骤：
+
+1. 配置真实支持对应端点的 APIKey 账号和正确 Base URL；Seedance 官方 Ark Plan Base URL应以 `/api/plan/v3` 结尾。
+2. 仅给已通过只读能力核对或人工验收的账号勾选媒体能力，不通过付费生成请求批量探测。
+3. 把账号加入目标 PeterAI 分组，并为公开模型配置独立价格。
+4. 用测试 Key 验证创建、轮询、响应内容、usage log、余额/订阅扣费和 failover 后，再让模型进入可用渠道元数据。
+
+视频 `/content` 路由仍未实现，Canvas 托管适配器依赖轮询响应直接返回下载 URL。不得把 Nginx 白名单误当成上游账号和价格已配置；当前生产数据库尚未配置可启用的 Seedance 账号/价格，禁止自动启用旧 `Ark` 账号。
 
 Canvas 的同步、发布、AGPL 源码和回滚规则以其 `PETER_FORK_MAINTENANCE.md` 为准。两个服务独立发版；Canvas 故障时只隐藏新菜单，不重建或回滚 Sub2API。
 

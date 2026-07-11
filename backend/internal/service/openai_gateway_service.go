@@ -246,6 +246,10 @@ type OpenAIForwardResult struct {
 	VideoResolution    string
 	// VideoDurationSeconds 是提交时请求的生成时长（xAI 按输出秒数计费），已归一化到 1-15 秒。
 	VideoDurationSeconds int
+	// RequestCount 用于 Audio Speech 等无 token usage 的按次计费端点。
+	RequestCount int
+	// MediaType 标识非图片媒体（audio/video），用于用量记录和幂等计费指纹。
+	MediaType string
 
 	wsReplayInput       []json.RawMessage
 	wsReplayInputExists bool

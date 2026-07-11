@@ -500,6 +500,35 @@ describe('EditAccountModal', () => {
     ])
   })
 
+  it('requires explicit opt-in for PeterAI managed Audio and Seedance endpoints', async () => {
+    const account = buildAccount()
+    updateAccountMock.mockReset()
+    checkMixedChannelRiskMock.mockReset()
+    checkMixedChannelRiskMock.mockResolvedValue({ has_risk: false })
+    updateAccountMock.mockResolvedValue(account)
+
+    const wrapper = mountModal(account)
+    const audio = wrapper.get<HTMLInputElement>(
+      '[data-testid="openai-endpoint-capability-audio_speech"]'
+    )
+    const seedance = wrapper.get<HTMLInputElement>(
+      '[data-testid="openai-endpoint-capability-seedance"]'
+    )
+    expect(audio.element.checked).toBe(false)
+    expect(seedance.element.checked).toBe(false)
+
+    await audio.setValue(true)
+    await seedance.setValue(true)
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+
+    expect(updateAccountMock.mock.calls[0]?.[1]?.credentials?.openai_capabilities).toEqual([
+      'chat_completions',
+      'embeddings',
+      'audio_speech',
+      'seedance'
+    ])
+  })
+
 	it('submits OpenAI quota auto-pause thresholds in extra', async () => {
 	  const account = buildAccount()
 	  account.extra = {
