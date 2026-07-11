@@ -90,7 +90,7 @@ git push origin custom/gallery
 | --- | --- | --- |
 | GPT-5.5 默认模型 | Codex `model` / `review_model` 默认 `gpt-5.5`；白名单、教程、价格都可识别 | `frontend/src/utils/clientConfig.ts`、`UseKeyModal.vue`、`UsageTutorialView.vue`、`useModelWhitelist.ts`、模型价格 JSON |
 | PeterAI 多模型生图 | 同 Key/同分组多选模型；任务独立 `n:1`；最多 4 并发；可分模型提示词 | `deploy/static/image-generator/` |
-| PeterAI 独立画布 | 外部 Canvas 服务和源码不并入 Sub2API；菜单、iframe、认证参数与 CSP 不能回归 | `settings.custom_menu_items`、`CustomPageView.vue`、外部 `peterai-canvas` fork |
+| PeterAI 独立画布 | 外部 Canvas 服务和源码不并入 Sub2API；菜单、iframe、认证参数与 CSP 不能回归；“新窗口打开”位于 iframe 上方工具栏，不遮挡画布控件 | `settings.custom_menu_items`、`CustomPageView.vue`、外部 `peterai-canvas` fork |
 | PeterAI 托管媒体 | Audio/Seedance 只调度显式能力 APIKey 账号；无明确价格 fail-closed；创建请求进入站内 usage 和扣费 | `openai_managed_media.go`、`gateway.go`、账号 `openai_capabilities` |
 | 图片画廊 | 可发布/下载/管理；默认永久保留；原图尽量不降质 | `backend/migrations/150_image_gallery_items.sql`、`gallery*.go`、`GalleryView.vue` |
 | 图片计费 | 价格来自 `prices_by_model`；前端不写死；只有真实图片输出才计费 | `api_key_service.go`、`billing_service.go`、`openai_images*.go` |

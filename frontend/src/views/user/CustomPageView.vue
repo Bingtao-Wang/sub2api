@@ -95,15 +95,17 @@
 
         <!-- Iframe embed mode -->
         <div v-else class="custom-embed-shell">
-          <a
-            :href="embeddedUrl"
-            target="_blank"
-            rel="noopener noreferrer"
-            class="btn btn-secondary btn-sm custom-open-fab"
-          >
-            <Icon name="externalLink" size="sm" class="mr-1.5" :stroke-width="2" />
-            {{ t('customPage.openInNewTab') }}
-          </a>
+          <div class="custom-embed-toolbar">
+            <a
+              :href="embeddedUrl"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="btn btn-secondary btn-sm"
+            >
+              <Icon name="externalLink" size="sm" class="mr-1.5" :stroke-width="2" />
+              {{ t('customPage.openInNewTab') }}
+            </a>
+          </div>
           <iframe
             :src="embeddedUrl"
             class="custom-embed-frame"
@@ -438,18 +440,20 @@ onUnmounted(() => {
 }
 
 .custom-embed-shell {
-  @apply relative;
+  @apply flex flex-col;
   @apply h-full w-full overflow-hidden rounded-2xl;
   @apply bg-gradient-to-b from-gray-50 to-white dark:from-dark-900 dark:to-dark-950;
   @apply p-0;
 }
 
-.custom-open-fab {
-  @apply absolute right-3 top-3 z-10;
-  @apply shadow-sm backdrop-blur supports-[backdrop-filter]:bg-white/80 dark:supports-[backdrop-filter]:bg-dark-800/80;
+.custom-embed-toolbar {
+  @apply flex shrink-0 justify-end border-b border-gray-200 px-3 py-2 dark:border-dark-600;
+  @apply bg-white dark:bg-dark-800;
 }
 
 .custom-embed-frame {
+  flex: 1 1 0%;
+  min-height: 0;
   display: block;
   margin: 0;
   width: 100%;
