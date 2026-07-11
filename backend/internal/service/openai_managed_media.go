@@ -101,11 +101,12 @@ func OpenAIManagedMediaModerationBody(endpoint OpenAIManagedMediaEndpoint, body 
 		return nil
 	}
 	payload := map[string]any{}
-	if endpoint == OpenAIManagedMediaAudioSpeech {
+	switch endpoint {
+	case OpenAIManagedMediaAudioSpeech:
 		if input := strings.TrimSpace(gjson.GetBytes(body, "input").String()); input != "" {
 			payload["prompt"] = input
 		}
-	} else if endpoint == OpenAIManagedMediaSeedanceCreate {
+	case OpenAIManagedMediaSeedanceCreate:
 		texts := make([]string, 0)
 		images := make([]map[string]string, 0)
 		for _, item := range gjson.GetBytes(body, "content").Array() {
@@ -280,7 +281,7 @@ func (s *OpenAIGatewayService) ForwardOpenAIManagedMedia(
 		responseTaskID = extractOpenAIManagedMediaTaskID(responseBody)
 		if responseTaskID == "" {
 			setOpsUpstreamError(c, http.StatusBadGateway, "Seedance upstream did not return a task ID", "")
-			return nil, errors.New("Seedance upstream did not return a task ID")
+			return nil, errors.New("seedance upstream did not return a task ID")
 		}
 	}
 	writeOpenAIManagedMediaResponse(c, resp, responseBody, s.responseHeaderFilter)
