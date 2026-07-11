@@ -90,6 +90,7 @@ git push origin custom/gallery
 | --- | --- | --- |
 | GPT-5.5 默认模型 | Codex `model` / `review_model` 默认 `gpt-5.5`；白名单、教程、价格都可识别 | `frontend/src/utils/clientConfig.ts`、`UseKeyModal.vue`、`UsageTutorialView.vue`、`useModelWhitelist.ts`、模型价格 JSON |
 | PeterAI 多模型生图 | 同 Key/同分组多选模型；任务独立 `n:1`；最多 4 并发；可分模型提示词 | `deploy/static/image-generator/` |
+| PeterAI 独立画布 | 外部 Canvas 服务和源码不并入 Sub2API；菜单、iframe、认证参数与 CSP 不能回归 | `settings.custom_menu_items`、`CustomPageView.vue`、外部 `peterai-canvas` fork |
 | 图片画廊 | 可发布/下载/管理；默认永久保留；原图尽量不降质 | `backend/migrations/150_image_gallery_items.sql`、`gallery*.go`、`GalleryView.vue` |
 | 图片计费 | 价格来自 `prices_by_model`；前端不写死；只有真实图片输出才计费 | `api_key_service.go`、`billing_service.go`、`openai_images*.go` |
 | Images failover | 网络错误、无图、可切换的上游拒绝会换账号；内容安全/参数错误不盲目重试 | `openai_images.go`、`openai_images_responses.go` |
@@ -179,6 +180,45 @@ GET    /api/v1/gallery/media/*path
 - `imageCount` 初始值必须是 `0`；只有解析到 `b64_json`、`url` 或其他可用图片时才累加。
 - 上游 HTTP 200 但无图片输出，必须触发 failover 或失败，不能进入成功计费。
 - 非内容策略类 `request_rejected` 可切换同组账号；内容安全拒绝不切换。
+
+### 3.3.1 PeterAI 独立画布
+
+画布源码和发布链位于独立仓库：
+
+```text
+/home/aihub/Peter_ws/peterai-canvas
+生产分支：custom/peterai
+上游：    https://github.com/basketikun/infinite-canvas.git
+公网：    https://canvas.peterai.cc.cd
+本机：    http://127.0.0.1:13000
+菜单 ID： 51be877493a8929d
+```
+
+Sub2API 侧只保存数据库菜单配置，不复制 Canvas 源码、不新增迁移、不修改 Dockerfile。必须保留原 PeterAI 画图菜单，并新增：
+
+```json
+{
+  "id": "51be877493a8929d",
+  "label": "PeterAI 画布",
+  "url": "https://canvas.peterai.cc.cd/canvas?mode=recent",
+  "visibility": "user",
+  "sort_order": 1
+}
+```
+
+Canvas 通过自身 `/peter-api` 白名单代理访问本机 Sub2API，Sub2API 不为它开放全局 CORS。每次上游同步后确认：
+
+```bash
+curl -fsS https://canvas.peterai.cc.cd/healthz
+curl -fsS https://api.peterai.cc.cd/api/v1/settings/public \
+  | jq -e '.data.custom_menu_items[] | select(.id == "51be877493a8929d")'
+curl -fsS https://api.peterai.cc.cd/custom/51be877493a8929d \
+  | grep -q 'canvas.peterai.cc.cd/canvas'
+```
+
+Canvas 自动导入非图片模型依赖管理设置 `available_channels_enabled=true`；关闭时 `/api/v1/channels/available` 会按设计返回空数组。当前 Sub2API 真实网关只支持 Models、Responses、Images 和 Grok 视频创建/轮询，尚无 Audio Speech、Seedance tasks、视频 content 路由；不得在验收中把 Nginx 白名单条目误当成后端已实现能力。
+
+Canvas 的同步、发布、AGPL 源码和回滚规则以其 `PETER_FORK_MAINTENANCE.md` 为准。两个服务独立发版；Canvas 故障时只隐藏新菜单，不重建或回滚 Sub2API。
 
 ### 3.4 多级代理
 
