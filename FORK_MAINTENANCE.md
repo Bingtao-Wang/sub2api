@@ -11,12 +11,12 @@
 | 上游 | `upstream/main` = `bc2244c83fd8` (`v0.1.151-403-gbc2244c83`, VERSION `0.1.158`) |
 | 定制源码提交 | `67e85ac78dd9` |
 | 当前仓库 HEAD | 以 `git rev-parse --short=12 HEAD` 为准 |
-| 生产镜像 | `sub2api-custom:20260717-upstream-v0158-85da1ba2` |
+| 生产镜像 | `sub2api-custom:20260717-upstream-v0158-3730ae83` |
 | Compose 项目 | `peter-sub2api` |
 | 本机入口 | `http://127.0.0.1:18080` |
 | 公网入口 | `https://api.peterai.cc.cd` |
 | 数据 volume | `peter-sub2api_sub2api_data` |
-| 最近发布备份 | `/home/aihub/Peter_ws/sub2api-backups/20260717_001529` |
+| 最近发布备份 | `/home/aihub/Peter_ws/sub2api-backups/20260717_003930` |
 
 快速确认：
 
