@@ -1413,6 +1413,13 @@ func (a *Account) SupportsOpenAIEndpointCapability(capability OpenAIEndpointCapa
 	if a.IsGrok() {
 		return capability == OpenAIEndpointCapabilityChatCompletions
 	}
+	if capability == OpenAIEndpointCapabilityAudioSpeech || capability == OpenAIEndpointCapabilitySeedance {
+		if a.Type != AccountTypeAPIKey {
+			return false
+		}
+		configured, found := a.openAIEndpointCapabilitySet()
+		return found && configured[string(capability)]
+	}
 	switch capability {
 	case OpenAIEndpointCapabilityChatCompletions:
 	case OpenAIEndpointCapabilityResponses:
