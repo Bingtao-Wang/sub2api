@@ -98,19 +98,19 @@ func (s *FrontendServer) Middleware() gin.HandlerFunc {
 			cleanPath = "index.html"
 		}
 
-		// Try local override before falling back to the SPA index. This allows
-		// operators to serve small static tools from data/public/<path>/.
-		if s.tryServeOverride(c, cleanPath) {
-			return
-		}
-
 		// For index.html or SPA routes, serve with injected settings
 		if cleanPath == "index.html" || !s.fileExists(cleanPath) {
 			s.serveIndexHTML(c)
 			return
 		}
 
-		// Serve static files normally
+		// Try local override first
+		if s.tryServeOverride(c, cleanPath) {
+			return
+		}
+
+		// Serve static files normally (hashed assets get long-lived cache headers)
+		applyStaticAssetCacheHeaders(c.Writer.Header(), cleanPath)
 		s.fileServer.ServeHTTP(c.Writer, c.Request)
 		c.Abort()
 	}
@@ -133,14 +133,8 @@ func (s *FrontendServer) tryServeOverride(c *gin.Context, cleanPath string) bool
 	}
 	filePath := filepath.Join(s.overrideDir, filepath.Clean("/"+cleanPath))
 	info, err := os.Stat(filePath)
-	if err != nil {
+	if err != nil || info.IsDir() {
 		return false
-	}
-	if info.IsDir() {
-		filePath = filepath.Join(filePath, "index.html")
-		if info, err = os.Stat(filePath); err != nil || info.IsDir() {
-			return false
-		}
 	}
 	c.File(filePath)
 	c.Abort()
@@ -273,13 +267,13 @@ func ServeEmbeddedFrontend() gin.HandlerFunc {
 		if cleanPath == "" {
 			cleanPath = "index.html"
 		}
-
 		if tryServeOverrideFile(c, overrideDir, cleanPath) {
 			return
 		}
 
 		if file, err := distFS.Open(cleanPath); err == nil {
 			_ = file.Close()
+			applyStaticAssetCacheHeaders(c.Writer.Header(), cleanPath)
 			fileServer.ServeHTTP(c.Writer, c.Request)
 			c.Abort()
 			return
@@ -319,9 +313,12 @@ func shouldBypassEmbeddedFrontend(path string) bool {
 		strings.HasPrefix(trimmed, "/antigravity/") ||
 		strings.HasPrefix(trimmed, "/setup/") ||
 		trimmed == "/health" ||
+		trimmed == "/models" ||
 		trimmed == "/responses" ||
 		strings.HasPrefix(trimmed, "/responses/") ||
-		strings.HasPrefix(trimmed, "/images/")
+		trimmed == "/alpha/search" ||
+		strings.HasPrefix(trimmed, "/images/") ||
+		strings.HasPrefix(trimmed, "/videos/")
 }
 
 func serveIndexHTML(c *gin.Context, fsys fs.FS) {

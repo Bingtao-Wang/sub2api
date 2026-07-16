@@ -454,24 +454,27 @@ func applyOpenAIImagesDefaults(req *OpenAIImagesRequest) {
 	req.Model = "gpt-image-2"
 }
 
+func isOpenAIImageGenerationModel(model string) bool {
+	return IsOpenAIImageModelAlias(model) || isGrokImageGenerationModel(model)
+}
+
 func IsOpenAIImageModelAlias(model string) bool {
 	normalized := strings.ToLower(strings.TrimSpace(model))
 	if normalized == "" {
 		return false
 	}
-	if strings.HasPrefix(normalized, "gpt-image-") ||
-		strings.HasPrefix(normalized, "chatgpt-image-") ||
-		strings.HasPrefix(normalized, "dall-e-") ||
-		strings.HasPrefix(normalized, "flux-") ||
-		strings.HasPrefix(normalized, "seedream-") ||
-		strings.HasPrefix(normalized, "nano-banana") {
+	if strings.HasPrefix(normalized, "gpt-image-") || strings.HasPrefix(normalized, "chatgpt-image-") ||
+		strings.HasPrefix(normalized, "dall-e-") || strings.HasPrefix(normalized, "flux-") ||
+		strings.HasPrefix(normalized, "seedream-") || strings.HasPrefix(normalized, "nano-banana") {
 		return true
 	}
 	return strings.Contains(normalized, "image")
 }
 
-func isOpenAIImageGenerationModel(model string) bool {
-	return IsOpenAIImageModelAlias(model) || isGrokImageGenerationModel(model)
+// IsGPTImageGenerationModel identifies the GPT native image-generation model family.
+func IsGPTImageGenerationModel(model string) bool {
+	model = strings.ToLower(strings.TrimSpace(model))
+	return strings.HasPrefix(model, "gpt-image-")
 }
 
 func isGrokImageGenerationModel(model string) bool {
@@ -631,15 +634,27 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesAPIKey(
 	resp, err := s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
 	SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(upstreamStart).Milliseconds())
 	if err != nil {
-		return nil, s.handleOpenAIUpstreamTransportError(upstreamCtx, c, account, err, false)
+		safeErr := sanitizeUpstreamErrorMessage(err.Error())
+		setOpsUpstreamError(c, 0, safeErr, "")
+		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+			Platform:           account.Platform,
+			AccountID:          account.ID,
+			AccountName:        account.Name,
+			UpstreamStatusCode: 0,
+			UpstreamURL:        safeUpstreamURL(upstreamReq.URL.String()),
+			Kind:               "request_error",
+			Message:            safeErr,
+		})
+		return nil, fmt.Errorf("upstream request failed: %s", safeErr)
 	}
 	if resp.StatusCode >= 400 {
 		respBody := s.readUpstreamErrorBody(resp)
 		_ = resp.Body.Close()
+		respBody = s.redactAgentIdentitySensitiveBody(upstreamCtx, account, respBody)
 		resp.Body = io.NopCloser(bytes.NewReader(respBody))
 		upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(respBody))
 		upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
-		if s.shouldFailoverOpenAIImagesUpstreamResponse(resp.StatusCode, upstreamMsg, respBody) {
+		if s.shouldFailoverOpenAIUpstreamResponse(resp.StatusCode, upstreamMsg, respBody) {
 			appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 				Platform:           account.Platform,
 				AccountID:          account.ID,
@@ -662,7 +677,7 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesAPIKey(
 	defer func() { _ = resp.Body.Close() }()
 
 	var usage OpenAIUsage
-	imageCount := 0
+	imageCount := parsed.N
 	var firstTokenMs *int
 	if parsed.Stream && isEventStreamResponse(resp.Header) {
 		streamUsage, streamCount, streamSizes, ttft, err := s.handleOpenAIImagesStreamingResponse(resp, c, startTime)
@@ -689,18 +704,6 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesAPIKey(
 		imageCount = streamCount
 		imageOutputSizes := streamSizes
 		firstTokenMs = ttft
-		if imageCount <= 0 {
-			responseWritten := c != nil && c.Writer != nil && c.Writer.Written()
-			if !responseWritten {
-				return nil, &UpstreamFailoverError{
-					StatusCode:             http.StatusBadGateway,
-					ResponseBody:           openAIImagesNoOutputResponseBody("upstream did not return image output"),
-					ResponseHeaders:        resp.Header.Clone(),
-					RetryableOnSameAccount: true,
-				}
-			}
-			return nil, fmt.Errorf("upstream did not return image output")
-		}
 		return &OpenAIForwardResult{
 			RequestID:        resp.Header.Get("x-request-id"),
 			Usage:            usage,
@@ -716,22 +719,14 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesAPIKey(
 			ImageOutputSizes: imageOutputSizes,
 		}, nil
 	} else {
-		nonStreamBody, nonStreamUsage, nonStreamCount, nonStreamSizes, err := s.readOpenAIImagesNonStreamingResponse(resp, c)
+		nonStreamUsage, nonStreamCount, nonStreamSizes, err := s.handleOpenAIImagesNonStreamingResponse(resp, c)
 		if err != nil {
 			return nil, err
 		}
-		if nonStreamCount <= 0 {
-			setOpsUpstreamError(c, http.StatusBadGateway, "upstream did not return image output", summarizeOpenAIImagesNoOutputBody(nonStreamBody))
-			return nil, &UpstreamFailoverError{
-				StatusCode:             http.StatusBadGateway,
-				ResponseBody:           openAIImagesNoOutputResponseBody("upstream did not return image output"),
-				ResponseHeaders:        resp.Header.Clone(),
-				RetryableOnSameAccount: true,
-			}
-		}
-		s.writeOpenAIImagesNonStreamingResponse(resp, c, nonStreamBody)
 		usage = nonStreamUsage
-		imageCount = nonStreamCount
+		if nonStreamCount > 0 {
+			imageCount = nonStreamCount
+		}
 		return &OpenAIForwardResult{
 			RequestID:        resp.Header.Get("x-request-id"),
 			Usage:            usage,
@@ -747,15 +742,6 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesAPIKey(
 			ImageOutputSizes: nonStreamSizes,
 		}, nil
 	}
-}
-
-func openAIImagesNoOutputResponseBody(message string) []byte {
-	if strings.TrimSpace(message) == "" {
-		message = "upstream did not return image output"
-	}
-	body := []byte(`{"error":{"type":"upstream_error","message":""}}`)
-	body, _ = sjson.SetBytes(body, "error.message", message)
-	return body
 }
 
 func (s *OpenAIGatewayService) buildOpenAIImagesRequest(
@@ -785,7 +771,15 @@ func (s *OpenAIGatewayService) buildOpenAIImagesRequest(
 		return nil, err
 	}
 	req = req.WithContext(WithHTTPUpstreamProfile(req.Context(), HTTPUpstreamProfileOpenAI))
-	req.Header.Set("Authorization", "Bearer "+token)
+	authHeaders, err := s.buildOpenAIAuthenticationHeaders(ctx, account, token)
+	if err != nil {
+		return nil, fmt.Errorf("build openai authentication headers: %w", err)
+	}
+	for key, values := range authHeaders {
+		for _, value := range values {
+			req.Header.Add(key, value)
+		}
+	}
 	for key, values := range c.Request.Header {
 		if !openaiPassthroughAllowedHeaders[strings.ToLower(key)] {
 			continue
@@ -896,16 +890,11 @@ func cloneMultipartHeader(src textproto.MIMEHeader) textproto.MIMEHeader {
 	return dst
 }
 
-func (s *OpenAIGatewayService) readOpenAIImagesNonStreamingResponse(resp *http.Response, c *gin.Context) ([]byte, OpenAIUsage, int, []string, error) {
+func (s *OpenAIGatewayService) handleOpenAIImagesNonStreamingResponse(resp *http.Response, c *gin.Context) (OpenAIUsage, int, []string, error) {
 	body, err := ReadUpstreamResponseBody(resp.Body, s.cfg, c, openAITooLargeError)
 	if err != nil {
-		return nil, OpenAIUsage{}, 0, nil, err
+		return OpenAIUsage{}, 0, nil, err
 	}
-	usage, _ := extractOpenAIUsageFromJSONBytes(body)
-	return body, usage, extractOpenAIImageCountFromJSONBytes(body), collectOpenAIResponseImageOutputSizesFromJSONBytes(body), nil
-}
-
-func (s *OpenAIGatewayService) writeOpenAIImagesNonStreamingResponse(resp *http.Response, c *gin.Context, body []byte) {
 	responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
 	contentType := "application/json"
 	if s.cfg != nil && !s.cfg.Security.ResponseHeaders.Enabled {
@@ -914,6 +903,9 @@ func (s *OpenAIGatewayService) writeOpenAIImagesNonStreamingResponse(resp *http.
 		}
 	}
 	c.Data(resp.StatusCode, contentType, body)
+
+	usage, _ := extractOpenAIUsageFromJSONBytes(body)
+	return usage, extractOpenAIImageCountFromJSONBytes(body), collectOpenAIResponseImageOutputSizesFromJSONBytes(body), nil
 }
 
 func (s *OpenAIGatewayService) handleOpenAIImagesStreamingResponse(
@@ -1171,6 +1163,9 @@ func mergeOpenAIUsage(dst *OpenAIUsage, body []byte) {
 		}
 		if parsed.CacheReadInputTokens > 0 {
 			dst.CacheReadInputTokens = parsed.CacheReadInputTokens
+		}
+		if parsed.ImageInputTokens > 0 {
+			dst.ImageInputTokens = parsed.ImageInputTokens
 		}
 		if parsed.ImageOutputTokens > 0 {
 			dst.ImageOutputTokens = parsed.ImageOutputTokens
