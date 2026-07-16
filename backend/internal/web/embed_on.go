@@ -98,14 +98,16 @@ func (s *FrontendServer) Middleware() gin.HandlerFunc {
 			cleanPath = "index.html"
 		}
 
-		// For index.html or SPA routes, serve with injected settings
-		if cleanPath == "index.html" || !s.fileExists(cleanPath) {
-			s.serveIndexHTML(c)
+		// Local public files may add routes that do not exist in the embedded
+		// frontend (for example /image-generator/), so check them before the
+		// SPA fallback.
+		if s.tryServeOverride(c, cleanPath) {
 			return
 		}
 
-		// Try local override first
-		if s.tryServeOverride(c, cleanPath) {
+		// For index.html or SPA routes, serve with injected settings
+		if cleanPath == "index.html" || !s.fileExists(cleanPath) {
+			s.serveIndexHTML(c)
 			return
 		}
 
@@ -133,8 +135,14 @@ func (s *FrontendServer) tryServeOverride(c *gin.Context, cleanPath string) bool
 	}
 	filePath := filepath.Join(s.overrideDir, filepath.Clean("/"+cleanPath))
 	info, err := os.Stat(filePath)
-	if err != nil || info.IsDir() {
+	if err != nil {
 		return false
+	}
+	if info.IsDir() {
+		filePath = filepath.Join(filePath, "index.html")
+		if info, err = os.Stat(filePath); err != nil || info.IsDir() {
+			return false
+		}
 	}
 	c.File(filePath)
 	c.Abort()

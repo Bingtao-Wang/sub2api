@@ -474,6 +474,20 @@ func TestOverrideFilesNeverReceiveImmutableCacheHeaders(t *testing.T) {
 	})
 }
 
+func TestOverrideDirectoryServesIndexBeforeSPAFallback(t *testing.T) {
+	overrideDir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(overrideDir, "image-generator"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(overrideDir, "image-generator", "index.html"), []byte("custom image generator"), 0o644))
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodGet, "/image-generator/", nil)
+	server := &FrontendServer{overrideDir: overrideDir}
+
+	assert.True(t, server.tryServeOverride(c, "image-generator/"))
+	assert.Equal(t, "custom image generator", w.Body.String())
+}
+
 func TestFrontendServer_Middleware(t *testing.T) {
 	t.Run("skips_api_routes", func(t *testing.T) {
 		provider := &mockSettingsProvider{
