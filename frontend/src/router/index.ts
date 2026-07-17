@@ -612,7 +612,7 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
-    path: '/admin/gallery',
+	path: '/admin/gallery',
     name: 'AdminGallery',
     component: () => import('@/views/admin/GalleryView.vue'),
     meta: {
@@ -620,7 +620,20 @@ const routes: RouteRecordRaw[] = [
       requiresAdmin: true,
       title: 'Image Gallery',
       titleKey: 'admin.gallery.title',
-      descriptionKey: 'admin.gallery.description'
+		descriptionKey: 'admin.gallery.description'
+	}
+  },
+  {
+	path: '/admin/prompt-audit',
+    name: 'AdminPromptAudit',
+    component: () => import('@/features/prompt-audit/PromptAuditView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Prompt Audit',
+      titleKey: 'admin.promptAudit.title',
+      descriptionKey: 'admin.promptAudit.description',
+		requiresRiskControl: true
     }
   },
   {

@@ -108,6 +108,9 @@ func RegisterAdminRoutes(
 		// 风控中心
 		registerContentModerationRoutes(admin, h)
 
+		// 独立提示词输入审计
+		registerPromptAuditRoutes(admin, h)
+
 		// 邀请返利（专属用户管理）
 		registerAffiliateRoutes(admin, h)
 
@@ -125,6 +128,22 @@ func registerGalleryRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		gallery.GET("/items", h.Admin.Gallery.List)
 		gallery.PUT("/items/:id", h.Admin.Gallery.Update)
 		gallery.POST("/cleanup", h.Admin.Gallery.Cleanup)
+	}
+}
+
+func registerPromptAuditRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+	promptAudit := admin.Group("/prompt-audit")
+	{
+		promptAudit.GET("/config", h.Admin.PromptAudit.GetConfig)
+		promptAudit.PUT("/config", h.Admin.PromptAudit.UpdateConfig)
+		promptAudit.POST("/endpoints/probe", h.Admin.PromptAudit.ProbeEndpoint)
+		promptAudit.GET("/runtime", h.Admin.PromptAudit.GetRuntime)
+		promptAudit.GET("/events", h.Admin.PromptAudit.ListEvents)
+		promptAudit.GET("/events/:id", h.Admin.PromptAudit.GetEvent)
+		promptAudit.DELETE("/events/:id", h.Admin.PromptAudit.DeleteEvent)
+		promptAudit.POST("/events/batch-delete", h.Admin.PromptAudit.BatchDelete)
+		promptAudit.POST("/events/delete-preview", h.Admin.PromptAudit.DeletePreview)
+		promptAudit.POST("/events/delete-by-filter", h.Admin.PromptAudit.DeleteByFilter)
 	}
 }
 
@@ -722,6 +741,10 @@ func registerAffiliateRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		affiliates.GET("/invites", h.Admin.Affiliate.ListInviteRecords)
 		affiliates.GET("/rebates", h.Admin.Affiliate.ListRebateRecords)
 		affiliates.GET("/transfers", h.Admin.Affiliate.ListTransferRecords)
+		affiliates.GET("/hierarchy/roots", h.Admin.Affiliate.ListHierarchyRoots)
+		affiliates.GET("/hierarchy", h.Admin.Affiliate.GetHierarchy)
+		affiliates.PUT("/hierarchy/users/:user_id/rate", h.Admin.Affiliate.UpdateHierarchyUserRate)
+		affiliates.PUT("/hierarchy/users/:user_id/access", h.Admin.Affiliate.UpdateHierarchyUserAccess)
 
 		users := affiliates.Group("/users")
 		{
