@@ -8,7 +8,7 @@
 | --- | --- |
 | 仓库 | `/home/aihub/Peter_ws/sub2api` |
 | 生产分支 | `custom/gallery` |
-| 上游 | `upstream/main` = `57914967cbb1` (`v0.1.160-1-g57914967c`, VERSION `0.1.160`) |
+| 上游 | `upstream/main` = `e625ce3b3b3b` (`v0.1.162-1-ge625ce3b3`, VERSION `0.1.162`) |
 | 定制源码提交 | `67e85ac78dd9` |
 | 当前仓库 HEAD | 以 `git rev-parse --short=12 HEAD` 为准 |
 | 生产镜像 | `sub2api-custom:20260717-upstream-v0160-f4bec547` |
