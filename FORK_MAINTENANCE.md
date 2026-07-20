@@ -11,12 +11,12 @@
 | 上游 | `upstream/main` = `e625ce3b3b3b` (`v0.1.162-1-ge625ce3b3`, VERSION `0.1.162`) |
 | 定制源码提交 | `67e85ac78dd9` |
 | 当前仓库 HEAD | 以 `git rev-parse --short=12 HEAD` 为准 |
-| 生产镜像 | `sub2api-custom:20260717-upstream-v0160-f4bec547` |
+| 生产镜像 | `sub2api-custom:20260720-upstream-v0162-56cafa22` |
 | Compose 项目 | `peter-sub2api` |
 | 本机入口 | `http://127.0.0.1:18080` |
 | 公网入口 | `https://api.peterai.cc.cd` |
 | 数据 volume | `peter-sub2api_sub2api_data` |
-| 最近发布备份 | `/home/aihub/Peter_ws/sub2api-backups/20260717_235930` |
+| 最近发布备份 | `/home/aihub/Peter_ws/sub2api-backups/20260720_181202` |
 
 快速确认：
 
@@ -530,6 +530,7 @@ api.peteraix.com  -> http://localhost:18080
 
 ## 8. 里程碑记录
 
+- `2026-07-20`：同步至 `v0.1.162-1-ge625ce3b3`，保留托管音频/Seedance、图片计费与故障转移等 fork 定制；生产镜像 `sub2api-custom:20260720-upstream-v0162-56cafa22`，发布前备份 `20260720_181202`，完整生产验收通过。
 - `2026-07-12`：新增 PeterAI 托管 `POST /v1/audio/speech`、Seedance 创建/轮询路由；仅调度管理员显式授权的 OpenAI APIKey 账号，无明确价格时 fail-closed；生产镜像 `sub2api-custom:20260712-upstream-v0151-e1da51f1`，发布前备份 `20260712_011100`，本机/公网验收通过。
 - `2026-07-10`：同步至 `v0.1.151-17-ge316ebf5`；生产镜像 `sub2api-custom:20260710-upstream-v0151-92bce245`；修复目录化 i18n 遗漏；前端 146 文件/936 测试通过，Go 1.26.5 `go test ./...` 通过。
 - `2026-07-07`：同步 `v0.1.146`，保留图片计费、Gallery、代理层级、问候和支付增强。
