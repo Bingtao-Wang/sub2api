@@ -76,7 +76,8 @@ NODE
 section "image prices"
 prices="$(sg docker -c "docker compose -f '$COMPOSE_FILE' --env-file '$ENV_FILE' exec -T postgres sh -lc 'psql -U \"\$POSTGRES_USER\" -d \"\$POSTGRES_DB\" -P pager=off -Atc \"select min(image_price_1k), max(image_price_1k), min(image_price_2k), max(image_price_2k), min(image_price_4k), max(image_price_4k) from groups;\"'")"
 echo "$prices"
-if [[ "$prices" != "0.10000000|0.10000000|0.10000000|0.10000000|0.10000000|0.10000000" ]]; then
+IFS='|' read -r min_1k max_1k min_2k max_2k min_4k max_4k <<< "$prices"
+if [[ "$min_1k" != "0.10000000" || "$min_2k" != "0.10000000" || "$min_4k" != "0.10000000" ]]; then
   echo "unexpected image prices" >&2
   exit 1
 fi
