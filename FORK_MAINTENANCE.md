@@ -8,15 +8,15 @@
 | --- | --- |
 | 仓库 | `/home/aihub/Peter_ws/sub2api` |
 | 生产分支 | `custom/gallery` |
-| 上游 | `upstream/main` = `d6d53052f` (`v0.1.169-48-gd6d53052f`, VERSION `0.1.169`) |
+| 上游 | `upstream/main` = `32a0d9ba2` (`v0.1.178-52-g32a0d9ba2`, VERSION `0.1.178`) |
 | 定制源码提交 | `67e85ac78dd9` |
 | 当前仓库 HEAD | 以 `git rev-parse --short=12 HEAD` 为准 |
-| 生产镜像 | `sub2api-custom:20260801-upstream-v0169-bd4a6515` |
+| 生产镜像 | `sub2api-custom:20260819-upstream-v0178-af5b7c7c` |
 | Compose 项目 | `peter-sub2api` |
 | 本机入口 | `http://127.0.0.1:18080` |
 | 公网入口 | `https://api.peterai.cc.cd` |
 | 数据 volume | `peter-sub2api_sub2api_data` |
-| 最近发布备份 | `/home/aihub/Peter_ws/sub2api-backups/20260801_123135` |
+| 最近发布备份 | `/home/aihub/Peter_ws/sub2api-backups/20260819_234858` |
 
 快速确认：
 
@@ -530,6 +530,7 @@ api.peteraix.com  -> http://localhost:18080
 
 ## 8. 里程碑记录
 
+- `2026-08-19`：同步至 `v0.1.178-52-g32a0d9ba2`，合并提交 `af5b7c7c8fff`，合并前备份分支 `custom/gallery-backup-20260819-before-v0.1.178`；保留 Gallery、托管媒体、图片计费与失败切换、GPT-5.5、代理层级、支付、问候和 i18n 定制，同时吸收 Channel Monitor V2、中国区渠道、Codex 身份/指纹、流恢复及风险控制修复。前端生产构建和后端生产二进制编译通过；生产镜像 `sub2api-custom:20260819-upstream-v0178-af5b7c7c`，发布前备份 `20260819_234858`。
 - `2026-08-01`：同步至 `v0.1.169-48-gd6d53052f`，合并提交 `bd4a6515f`，合并前备份分支 `custom/gallery-backup-20260801-before-v0.1.169`；保留 Gallery、托管媒体、图片计费与失败切换、GPT-5.5、代理层级、支付、问候和 i18n 定制，同时吸收 Passkey、Model Plaza、OpenAI Live、Responses 子路径保护及上游安全/计费修复；前端 205 文件/1400 测试、类型检查、生产构建和 Go 1.26.5 `go test ./...` 通过。生产镜像 `sub2api-custom:20260801-upstream-v0169-bd4a6515`，发布前备份 `20260801_123135`，完整生产验收通过。
 - `2026-07-24`：源码分支同步至 `v0.1.164-1-gcb24522dd`，合并前备份分支 `custom/gallery-backup-20260723-before-v0.1.164`；保留 Gallery、托管媒体、图片计费与失败切换、GPT-5.5、代理层级、支付、问候和 i18n 定制，同时吸收组合分组、Ollama Cloud 用量、推理策略及上游安全修复；前端 192 文件/1313 测试、生产构建和 Go 1.26.5 `go test ./...` 通过。本次仅更新 fork 源码，尚未发布生产，生产镜像仍为 `sub2api-custom:20260720-upstream-v0162-56cafa22`。
 - `2026-07-20`：同步至 `v0.1.162-1-ge625ce3b3`，保留托管音频/Seedance、图片计费与故障转移等 fork 定制；生产镜像 `sub2api-custom:20260720-upstream-v0162-56cafa22`，发布前备份 `20260720_181202`，完整生产验收通过。
