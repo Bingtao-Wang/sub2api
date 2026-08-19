@@ -134,7 +134,7 @@
                 {{ displayName }}
               </div>
               <div class="text-xs text-gray-500 dark:text-dark-400">
-                {{ t('admin.users.roles.' + user.role) }}
+                {{ userRoleLabel }}
               </div>
             </div>
             <Icon name="chevronDown" size="sm" class="hidden text-gray-400 md:block" />
@@ -322,6 +322,12 @@ const displayName = computed(() => {
   if (!user.value) return ''
   return user.value.username || user.value.email?.split('@')[0] || ''
 })
+
+const userRoleLabel = computed(() =>
+  user.value?.role === 'admin'
+    ? t('admin.users.roles.admin')
+    : t('admin.users.roles.user'),
+)
 
 const greetingVariant = computed(() => {
   const hour = now.value.getHours()

@@ -918,7 +918,9 @@ var ProviderSet = wire.NewSet(
 
 func ProvideGalleryService(repo GalleryRepository, cfg *config.Config) *GalleryService {
 	dataDir := "./data"
-	if cfg != nil && cfg.Pricing.DataDir != "" { dataDir = cfg.Pricing.DataDir }
+	if cfg != nil && cfg.Pricing.DataDir != "" {
+		dataDir = cfg.Pricing.DataDir
+	}
 	svc := NewGalleryService(repo, GalleryConfig{DataDir: dataDir})
 	_ = os.MkdirAll(filepath.Join(dataDir, "gallery"), 0755)
 	svc.StartCleanupWorker()

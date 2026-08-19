@@ -393,7 +393,7 @@ sg docker -c "docker run --rm \
   -v '$PWD/backend:/app' -w /app \
   -e GOPROXY='https://goproxy.cn,direct' \
   -e GOSUMDB='sum.golang.google.cn' \
-  golang:1.26.5 go test ./... -count=1"
+  golang:1.26.6 go test ./... -count=1"
 ```
 
 关键定制快速测试：
@@ -402,7 +402,39 @@ sg docker -c "docker run --rm \
 deploy/test-with-docker.sh
 ```
 
-### 5.2 标准发布
+### 5.2 GitHub Actions 门禁（每次同步、修复和发布后必做）
+
+代码推送后，必须检查当前提交对应的 `CI` 和 `Security Scan` 两个 workflow。两个 workflow 都必须达到 `status=completed` 且 `conclusion=success`，才能把本次同步或发布标记为完成；任何失败都要定位失败 job/step，修复后重新推送并再次检查。
+
+优先使用 GitHub CLI：
+
+```bash
+sha="$(git rev-parse HEAD)"
+for workflow in CI "Security Scan"; do
+  gh run list --repo Bingtao-Wang/sub2api \
+    --workflow "$workflow" --branch custom/gallery --limit 20 \
+    --json databaseId,headSha,status,conclusion,displayTitle \
+    | jq -e --arg sha "$sha" \
+      '.[] | select(.headSha == $sha) | select(.status == "completed" and .conclusion == "success")' \
+    | head -1 >/dev/null
+done
+```
+
+没有 `gh` 或需要审计详情时，使用公共 REST API 查看 run、job 和失败 step：
+
+```bash
+sha="$(git rev-parse HEAD)"
+curl -fsSL 'https://api.github.com/repos/Bingtao-Wang/sub2api/actions/runs?branch=custom/gallery&per_page=100' \
+  | jq --arg sha "$sha" '.workflow_runs[] | select(.head_sha == $sha) |
+      {id,name,status,conclusion,html_url}'
+curl -fsSL 'https://api.github.com/repos/Bingtao-Wang/sub2api/actions/runs/<run_id>/jobs?per_page=100' \
+  | jq '.jobs[] | {name,status,conclusion,html_url,
+      failed_steps: [.steps[]? | select(.conclusion == "failure") | .name]}'
+```
+
+如果 Actions 页面显示失败，不能只重跑并忽略结果；先记录根因和修复提交，再确认修复提交触发的新 `CI`、`Security Scan` run 均成功。下载日志需要仓库管理权限，权限不足时至少保留 run/job/step API 输出和网页链接。
+
+### 5.3 标准发布
 
 1. 确认 `custom/gallery` 已推送，工作区干净。
 2. 运行本地备份并校验。
@@ -443,7 +475,7 @@ deploy/verify-production.sh
 - Gallery、代理层级、教程、问候、支付不直接显示 i18n key。
 - 日志没有迁移失败、panic 或持续启动错误。
 
-### 5.3 回滚
+### 5.4 回滚
 
 优先只回滚应用镜像：
 
@@ -530,6 +562,8 @@ api.peteraix.com  -> http://localhost:18080
 
 ## 8. 里程碑记录
 
+- `2026-08-20`：重新核对 `upstream/main`，仍为 `32a0d9ba2d537875f605e0360c28c7f8d418a29a`（`v0.1.178-52-g32a0d9ba2`）。针对合并后回归和 `CI #64`/`Security Scan #75` 的 `Verify Go version` 失败完成修复：恢复 Go 1.26.6 及文档/构建链版本，补回 Responses input-tokens 路由、OpenAI/CN provider/媒体计费与 Codex 身份逻辑，恢复 OAuth 图片 HTTP/2 body 读错误 failover，固定分组用量 integration 测试的上海会话时区，修复 AppHeader 动态角色 i18n 检查和残留格式/lint 问题。当前本地等价门禁：后端 unit 全量通过、integration 全量通过、golangci-lint v2.9 通过、govulncheck 无可达漏洞、前端全量 238 文件/1663 测试通过、lint/typecheck/关键测试/生产构建通过；部署 shell、Docker 安全/资源、Caddy 检查通过（Apple 容器脚本仅在 Linux 因 BSD `stat` 语法不可复现，交由 macOS runner 验证）。代码提交和 GitHub Actions run ID 待推送后补录。
+- `2026-08-20`：复核提交 `ba6be8e2378a` 的 GitHub Actions。`CI #64`（run `32272542721`）的 `test`、`golangci-lint`，以及 `Security Scan #75`（run `32272542700`）的 `backend-security` 均在 `Verify Go version` 失败；原因是合并上游时 `backend/go.mod` 回落到 `1.26.5`，而 fork 的 CI、Security Scan、Release 和 Docker 构建链要求安全版本 `1.26.6`。恢复 Go 版本并补充发布后 Actions 门禁；修复提交推送后必须重新核对两个 workflow。
 - `2026-08-19`：同步至 `v0.1.178-52-g32a0d9ba2`，合并提交 `af5b7c7c8fff`，合并前备份分支 `custom/gallery-backup-20260819-before-v0.1.178`；保留 Gallery、托管媒体、图片计费与失败切换、GPT-5.5、代理层级、支付、问候和 i18n 定制，同时吸收 Channel Monitor V2、中国区渠道、Codex 身份/指纹、流恢复及风险控制修复。前端生产构建和后端生产二进制编译通过；生产镜像 `sub2api-custom:20260819-upstream-v0178-af5b7c7c`，发布前备份 `20260819_234858`。
 - `2026-08-01`：同步至 `v0.1.169-48-gd6d53052f`，合并提交 `bd4a6515f`，合并前备份分支 `custom/gallery-backup-20260801-before-v0.1.169`；保留 Gallery、托管媒体、图片计费与失败切换、GPT-5.5、代理层级、支付、问候和 i18n 定制，同时吸收 Passkey、Model Plaza、OpenAI Live、Responses 子路径保护及上游安全/计费修复；前端 205 文件/1400 测试、类型检查、生产构建和 Go 1.26.5 `go test ./...` 通过。生产镜像 `sub2api-custom:20260801-upstream-v0169-bd4a6515`，发布前备份 `20260801_123135`，完整生产验收通过。
 - `2026-07-24`：源码分支同步至 `v0.1.164-1-gcb24522dd`，合并前备份分支 `custom/gallery-backup-20260723-before-v0.1.164`；保留 Gallery、托管媒体、图片计费与失败切换、GPT-5.5、代理层级、支付、问候和 i18n 定制，同时吸收组合分组、Ollama Cloud 用量、推理策略及上游安全修复；前端 192 文件/1313 测试、生产构建和 Go 1.26.5 `go test ./...` 通过。本次仅更新 fork 源码，尚未发布生产，生产镜像仍为 `sub2api-custom:20260720-upstream-v0162-56cafa22`。
