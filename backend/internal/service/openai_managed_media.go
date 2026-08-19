@@ -180,7 +180,7 @@ func (s *OpenAIGatewayService) ValidateOpenAIManagedMediaPricing(ctx context.Con
 			}
 		}
 	}
-	if endpoint == OpenAIManagedMediaSeedanceCreate && !durationAuto && apiKeyHasConfiguredVideoPrice(apiKey, resolution) {
+	if endpoint == OpenAIManagedMediaSeedanceCreate && !durationAuto && apiKeyHasConfiguredVideoPrice(apiKey, requestedModel, resolution) {
 		return nil
 	}
 	return fmt.Errorf("model %q has no explicit PeterAI %s price", strings.TrimSpace(requestedModel), endpoint.MediaType())

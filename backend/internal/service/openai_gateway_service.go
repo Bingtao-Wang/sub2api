@@ -36,7 +36,8 @@ const (
 	// 与真实 Codex CLI 的 User-Agent 结构对齐：
 	// {originator}/{version} ({OS} {OS_version}; {arch}) {terminal}
 	// 旧值 "codex_cli_rs/0.125.0" 缺少 OS/架构/终端后缀，易被上游指纹识别为非官方客户端。
-	codexCLIUserAgent = "codex_cli_rs/0.144.1 (Ubuntu 22.4.0; x86_64) xterm-256color"
+	codexCLIUserAgentSuffix = " (Ubuntu 22.4.0; x86_64) xterm-256color"
+	codexCLIUserAgent = "codex_cli_rs/0.144.1" + codexCLIUserAgentSuffix
 	// codex_cli_only 拒绝时单个请求头日志长度上限（字符）
 	codexCLIOnlyHeaderValueMaxBytes = 256
 
@@ -233,6 +234,8 @@ type OpenAIForwardResult struct {
 	// UpstreamModel is the actual model sent to the upstream provider after mapping.
 	// Empty when no mapping was applied (requested model was used as-is).
 	UpstreamModel string
+	UpstreamResponseModel string
+	UpstreamResponseModelConflict bool
 	// UpstreamEndpoint is the actual upstream API path used for this request.
 	// It avoids guessing when one downstream protocol can use multiple upstream endpoints.
 	UpstreamEndpoint string
@@ -269,9 +272,12 @@ type OpenAIForwardResult struct {
 	RequestCount int
 	// MediaType 标识非图片媒体（audio/video），用于用量记录和幂等计费指纹。
 	MediaType string
+	SearchCount int
+	AudioUsage *AudioUsage
 
 	wsReplayInput       []json.RawMessage
 	wsReplayInputExists bool
+	wsAccountFailoverReplayInput []json.RawMessage
 }
 
 // SucceededForScheduling reports whether this result is an upstream success
@@ -448,6 +454,8 @@ type OpenAIGatewayService struct {
 	codexModelsManifestCache            codexModelsManifestCache
 	openaiCompatSessionResponses        sync.Map
 	openaiCompatAnthropicDigestSessions sync.Map
+	openaiCodexTurnStateOrigins sync.Map
+	openaiCodexTurnStateWrites atomic.Uint64
 }
 
 // NewOpenAIGatewayService creates a new OpenAIGatewayService

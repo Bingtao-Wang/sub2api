@@ -170,7 +170,7 @@ func (h *OpenAIGatewayHandler) handleOpenAIManagedMedia(c *gin.Context, endpoint
 		account := selection.Account
 		setOpsSelectedAccount(c, account.ID, account.Platform)
 		accountRelease, accountAcquired := h.acquireResponsesAccountSlot(c, apiKey.GroupID, sessionHash, selection, false, &streamStarted, reqLog)
-		if !accountAcquired {
+		if accountAcquired != openAISlotAcquireOK {
 			return
 		}
 		service.SetOpsLatencyMs(c, service.OpsRoutingLatencyMsKey, time.Since(routingStartedAt).Milliseconds())

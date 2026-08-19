@@ -21,6 +21,7 @@ const (
 	EndpointAlphaSearch       = "/v1/alpha/search"
 	EndpointResponses         = "/v1/responses"
 	EndpointResponsesCompact  = "/v1/responses/compact"
+	EndpointResponsesInputTokens = "/v1/responses/input_tokens"
 	EndpointImagesGenerations = "/v1/images/generations"
 	EndpointImagesEdits       = "/v1/images/edits"
 	EndpointAudioSpeech       = "/v1/audio/speech"

@@ -35,7 +35,13 @@ type OpenAIRecordUsageInput struct {
 	QuotaPlatform      string // user×platform quota platform resolved by the handler before async billing.
 	// CyberBlocked 为 true 时把该用量行标记为 cyber（request_type=cyber），计费逻辑不变。
 	CyberBlocked bool
+	PricingAt time.Time
 	ChannelUsageFields
+}
+
+func openAIUsagePricingAt(input *OpenAIRecordUsageInput) time.Time {
+	if input != nil && !input.PricingAt.IsZero() { return input.PricingAt }
+	return timezone.Now()
 }
 
 // CyberPolicyUsageInput 是 cyber 拒绝、未走正常 RecordUsage 的请求记录用量的入参。
@@ -601,13 +607,13 @@ func (s *OpenAIGatewayService) calculateOpenAIVideoCost(
 	resolution := NormalizeVideoBillingResolutionOrDefault(result.VideoResolution)
 	durationSeconds := NormalizeVideoBillingDurationSecondsOrDefault(result.VideoDurationSeconds)
 	groupConfig := videoPriceConfigFromAPIKey(apiKey)
-	if apiKeyHasConfiguredVideoPrice(apiKey, resolution) {
+	if apiKeyHasConfiguredVideoPrice(apiKey, billingModel, resolution) {
 		return s.billingService.CalculateVideoCost(billingModel, resolution, videoCount, durationSeconds, groupConfig, multiplier)
 	}
 	if refreshed := s.apiKeyWithFreshGroupMediaPricing(ctx, apiKey); refreshed != apiKey {
 		apiKey = refreshed
 		groupConfig = videoPriceConfigFromAPIKey(apiKey)
-		if apiKeyHasConfiguredVideoPrice(apiKey, resolution) {
+		if apiKeyHasConfiguredVideoPrice(apiKey, billingModel, resolution) {
 			return s.billingService.CalculateVideoCost(billingModel, resolution, videoCount, durationSeconds, groupConfig, multiplier)
 		}
 	}
