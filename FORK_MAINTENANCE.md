@@ -8,8 +8,8 @@
 | --- | --- |
 | 仓库 | `/home/aihub/Peter_ws/sub2api` |
 | 生产分支 | `custom/gallery` |
-| 上游 | `upstream/main` = `32a0d9ba2` (`v0.1.178-52-g32a0d9ba2`, VERSION `0.1.178`) |
-| 定制源码提交 | `67e85ac78dd9` |
+| 上游 | `upstream/main` = `5097b3145` (`v0.2.0-1-g5097b3145`, VERSION `0.2.0`) |
+| 定制源码提交 | `ade0df8d7d09` |
 | 当前仓库 HEAD | 以 `git rev-parse --short=12 HEAD` 为准 |
 | 生产镜像 | `sub2api-custom:20260819-upstream-v0178-af5b7c7c` |
 | Compose 项目 | `peter-sub2api` |
@@ -393,7 +393,7 @@ sg docker -c "docker run --rm \
   -v '$PWD/backend:/app' -w /app \
   -e GOPROXY='https://goproxy.cn,direct' \
   -e GOSUMDB='sum.golang.google.cn' \
-  golang:1.26.6 go test ./... -count=1"
+  golang:1.27.0 go test ./... -count=1"
 ```
 
 关键定制快速测试：
@@ -562,6 +562,7 @@ api.peteraix.com  -> http://localhost:18080
 
 ## 8. 里程碑记录
 
+- `2026-09-03`：通过 GitHub REST API 核对 `upstream/main` 最新提交为 `5097b31457e6dc9f49e5f5c9c72b925ce79543b3`（`v0.2.0-1-g5097b3145`，VERSION `0.2.0`），以 merge commit `ade0df8d7d09` 同步到 `custom/gallery`，合并前备份分支为 `custom/gallery-backup-20260903-before-v0.2.0`。保留 Gallery、托管媒体、图片计费与 failover、GPT-5.5、代理层级、易支付、问候、i18n、PeterAI 多模型生图及 Canvas 定制；修复 PeterAI `/api/v1/user/image-generation/options` 因 `AccountRepository` 未注入导致的 500，模型发现同时识别映射键/值和分组 `models_list_config`，只返回可调度 OpenAI 账号的公开别名，并为空映射/透传账号提供有限图片默认模型；同时恢复 CN adaptive 账号的 OpenAI 协议密钥读取并适配上游新版托管媒体调度签名。生产数据库只读核对确认生图分组可发现 `gpt-image-2`，VIP 生图分组可发现 `gpt-image-1`、`gpt-image-1.5`、`gpt-image-2`。发布前本地门禁：Go 1.27.0 unit/无标签/integration 全量通过、golangci-lint v2.13 为 0 issues、govulncheck 无可达漏洞；前端 ESLint/typecheck、256 文件/1848 测试、定制 i18n 3 文件/15 测试和 production build 通过；Wire 生成、PeterAI 静态脚本、Docker 快速测试、Compose 安全/环境/资源/Caddy、audit 例外及源码不变量检查通过。Apple Container 脚本在 Linux 仅完成语法检查，必须等待 GitHub macOS job；生产仍使用上一版镜像，须待本次精确提交的 `CI` 和 `Security Scan` 均成功后再备份发布。
 - `2026-08-20`：重新核对 `upstream/main`，仍为 `32a0d9ba2d537875f605e0360c28c7f8d418a29a`（`v0.1.178-52-g32a0d9ba2`）。针对合并后回归和 `CI #64`/`Security Scan #75` 的 `Verify Go version` 失败完成修复：恢复 Go 1.26.6 及文档/构建链版本，补回 Responses input-tokens 路由、OpenAI/CN provider/媒体计费与 Codex 身份逻辑，恢复 OAuth 图片 HTTP/2 body 读错误 failover，固定分组用量 integration 测试的上海会话时区，修复 AppHeader 动态角色 i18n 检查和残留格式/lint 问题。修复提交 `a821bc0fe5a1`；本地等价门禁：后端 unit/无标签/integration 全量通过、golangci-lint v2.9 通过、govulncheck 无可达漏洞、前端全量 238 文件/1663 测试通过、lint/typecheck/关键测试/生产构建通过；部署 shell、Docker 安全/资源、Caddy 检查通过。该提交对应 `CI #65`（run `32279772190`）和 `Security Scan #76`（run `32279772144`）均为 `completed/success`，其中 macOS shell job 验证了本机 Linux 无法复现的 Apple 容器脚本。
 - `2026-08-20`：复核提交 `ba6be8e2378a` 的 GitHub Actions。`CI #64`（run `32272542721`）的 `test`、`golangci-lint`，以及 `Security Scan #75`（run `32272542700`）的 `backend-security` 均在 `Verify Go version` 失败；原因是合并上游时 `backend/go.mod` 回落到 `1.26.5`，而 fork 的 CI、Security Scan、Release 和 Docker 构建链要求安全版本 `1.26.6`。恢复 Go 版本并补充发布后 Actions 门禁；修复提交推送后必须重新核对两个 workflow。
 - `2026-08-19`：同步至 `v0.1.178-52-g32a0d9ba2`，合并提交 `af5b7c7c8fff`，合并前备份分支 `custom/gallery-backup-20260819-before-v0.1.178`；保留 Gallery、托管媒体、图片计费与失败切换、GPT-5.5、代理层级、支付、问候和 i18n 定制，同时吸收 Channel Monitor V2、中国区渠道、Codex 身份/指纹、流恢复及风险控制修复。前端生产构建和后端生产二进制编译通过；生产镜像 `sub2api-custom:20260819-upstream-v0178-af5b7c7c`，发布前备份 `20260819_234858`。
