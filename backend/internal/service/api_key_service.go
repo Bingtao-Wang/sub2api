@@ -17,6 +17,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ip"
+	openaiModels "github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/timezone"
 	"github.com/dgraph-io/ristretto"
@@ -635,7 +636,7 @@ func (s *APIKeyService) GetImageGenerationOptions(ctx context.Context, userID in
 		}
 		models, ok := modelsByGroup[group.ID]
 		if !ok {
-			models, err = s.imageGenerationModelsForGroup(ctx, group.ID)
+			models, err = s.imageGenerationModelsForGroup(ctx, group)
 			if err != nil {
 				return nil, err
 			}
@@ -726,32 +727,76 @@ func (s *APIKeyService) estimateImagePrice(ctx context.Context, groupID int64, m
 	return &value
 }
 
-func (s *APIKeyService) imageGenerationModelsForGroup(ctx context.Context, groupID int64) ([]string, error) {
-	accounts, err := s.accountRepo.ListByGroup(ctx, groupID)
+func (s *APIKeyService) imageGenerationModelsForGroup(ctx context.Context, group *Group) ([]string, error) {
+	if group == nil {
+		return nil, nil
+	}
+	accounts, err := s.accountRepo.ListByGroup(ctx, group.ID)
 	if err != nil {
 		return nil, fmt.Errorf("list group accounts: %w", err)
 	}
-	seen := make(map[string]struct{})
+	return imageGenerationModelsForAccounts(group, accounts), nil
+}
+
+// imageGenerationModelsForAccounts returns finite, client-requestable model
+// aliases. model_mapping keys are the public aliases while values are the
+// upstream models, so either side may identify an image route but only the key
+// is returned. Empty mappings and passthrough accounts accept arbitrary models;
+// for those accounts we advertise the finite OpenAI image defaults (or the
+// group's explicit custom list) rather than exposing a wildcard.
+func imageGenerationModelsForAccounts(group *Group, accounts []Account) []string {
+	eligible := make([]*Account, 0, len(accounts))
+	candidates := make(map[string]struct{})
+	customListEnabled := group != nil && group.CustomModelsListEnabled()
+	if customListEnabled {
+		for _, model := range group.ModelsListConfig.Models {
+			if model = strings.TrimSpace(model); model != "" && !strings.Contains(model, "*") {
+				candidates[model] = struct{}{}
+			}
+		}
+	}
+
 	for i := range accounts {
 		account := &accounts[i]
 		if account.Platform != PlatformOpenAI || !account.IsSchedulable() {
 			continue
 		}
+		eligible = append(eligible, account)
+		if customListEnabled {
+			continue
+		}
+
 		mapping := account.GetModelMapping()
+		if len(mapping) == 0 || account.IsOpenAIPassthroughEnabled() {
+			for _, model := range openaiModels.DefaultModelIDs() {
+				if isOpenAIImageGenerationModel(model) {
+					candidates[model] = struct{}{}
+				}
+			}
+		}
 		for requested := range mapping {
-			model := strings.TrimSpace(requested)
-			if model == "" || strings.Contains(model, "*") || !IsOpenAIImageModelAlias(model) {
+			if requested = strings.TrimSpace(requested); requested == "" || strings.Contains(requested, "*") {
 				continue
 			}
-			seen[model] = struct{}{}
+			candidates[requested] = struct{}{}
 		}
 	}
-	models := make([]string, 0, len(seen))
-	for model := range seen {
-		models = append(models, model)
+
+	models := make([]string, 0, len(candidates))
+	for candidate := range candidates {
+		for _, account := range eligible {
+			if !account.IsModelSupported(candidate) {
+				continue
+			}
+			mapped := strings.TrimSpace(account.GetMappedModel(candidate))
+			if isOpenAIImageGenerationModel(candidate) || isOpenAIImageGenerationModel(mapped) {
+				models = append(models, candidate)
+				break
+			}
+		}
 	}
 	sortImageGenerationModels(models)
-	return models, nil
+	return models
 }
 
 func sortImageGenerationModels(models []string) {
@@ -1273,20 +1318,21 @@ func (s *APIKeyService) SearchAPIKeys(ctx context.Context, userID int64, keyword
 	return keys, nil
 }
 
-// GetUserAllowedGroupIDSet 返回 user_allowed_groups 授权给该用户的专属分组 ID 集合。
+// GetUserGroupVisibility 返回 user_allowed_groups 授权给该用户的分组 ID 集合，
+// 以及该用户是否开启了公开分组限制。开启时公开分组的可见性也要落在该集合内。
 //
 // 与 GetAvailableGroups 的区别：这里是「橱窗」语义（模型广场用），不检查订阅有效性，
 // 也不关心分组是否活跃——仅回答"哪些专属分组对该用户可见"。返回值恒非 nil。
-func (s *APIKeyService) GetUserAllowedGroupIDSet(ctx context.Context, userID int64) (map[int64]struct{}, error) {
+func (s *APIKeyService) GetUserGroupVisibility(ctx context.Context, userID int64) (map[int64]struct{}, bool, error) {
 	user, err := s.userRepo.GetByID(ctx, userID)
 	if err != nil {
-		return nil, fmt.Errorf("get user: %w", err)
+		return nil, false, fmt.Errorf("get user: %w", err)
 	}
 	allowed := make(map[int64]struct{}, len(user.AllowedGroups))
 	for _, id := range user.AllowedGroups {
 		allowed[id] = struct{}{}
 	}
-	return allowed, nil
+	return allowed, user.RestrictPublicGroups, nil
 }
 
 // GetUserGroupRates 获取用户的专属分组倍率配置

@@ -186,7 +186,7 @@ func (h *OpenAIGatewayHandler) handleOpenAIManagedMedia(c *gin.Context, endpoint
 		if forwardErr != nil {
 			var failoverErr *service.UpstreamFailoverError
 			if errors.As(forwardErr, &failoverErr) {
-				h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, account.GetMappedModel(requestModel), false, nil)
+				h.gatewayService.ReportOpenAIAccountScheduleResult(account, account.GetMappedModel(requestModel), false, nil, forwardErr)
 				if c.Writer.Size() != writerSizeBefore {
 					h.handleFailoverExhausted(c, failoverErr, true)
 					return
@@ -212,7 +212,7 @@ func (h *OpenAIGatewayHandler) handleOpenAIManagedMedia(c *gin.Context, endpoint
 				switchCount++
 				continue
 			}
-			h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, account.GetMappedModel(requestModel), false, nil)
+			h.gatewayService.ReportOpenAIAccountScheduleResult(account, account.GetMappedModel(requestModel), false, nil, forwardErr)
 			if c.Writer.Size() == writerSizeBefore {
 				h.errorResponse(c, http.StatusBadGateway, "upstream_error", "Upstream request failed")
 			}
@@ -220,7 +220,7 @@ func (h *OpenAIGatewayHandler) handleOpenAIManagedMedia(c *gin.Context, endpoint
 			return
 		}
 
-		h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, account.GetMappedModel(requestModel), true, nil)
+		h.gatewayService.ReportOpenAIAccountScheduleResult(account, account.GetMappedModel(requestModel), true, nil)
 		if endpoint == service.OpenAIManagedMediaSeedanceCreate && result != nil && strings.TrimSpace(result.ResponseID) != "" {
 			if err := h.gatewayService.BindOpenAIManagedMediaTaskAccount(requestCtx, apiKey.GroupID, result.ResponseID, account.ID); err != nil {
 				reqLog.Warn("managed_media.bind_task_account_failed", zap.String("task_id", result.ResponseID), zap.Error(err))
