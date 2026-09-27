@@ -40,7 +40,7 @@ describe('UseKeyModal', () => {
     saveAsMock.mockClear()
   })
 
-  it('omits the attribution override from every standard Claude Code setup form', async () => {
+  it('sets the attribution override to zero in every standard Claude Code setup form', async () => {
     const wrapper = mount(UseKeyModal, {
       props: {
         show: true,
@@ -60,10 +60,10 @@ describe('UseKeyModal', () => {
       }
     })
 
-    for (const [shell, trafficSetting] of [
-      ['macOS / Linux', 'export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1'],
-      ['Windows CMD', 'set CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1'],
-      ['PowerShell', '$env:CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1']
+    for (const [shell, attributionSetting, trafficSetting] of [
+      ['macOS / Linux', 'export CLAUDE_CODE_ATTRIBUTION_HEADER=0', 'export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1'],
+      ['Windows CMD', 'set CLAUDE_CODE_ATTRIBUTION_HEADER=0', 'set CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1'],
+      ['PowerShell', '$env:CLAUDE_CODE_ATTRIBUTION_HEADER=0', '$env:CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1']
     ]) {
       if (shell !== 'macOS / Linux') {
         const shellTab = wrapper.findAll('button').find(
@@ -78,10 +78,10 @@ describe('UseKeyModal', () => {
       const allCode = codeBlocks.join('\n')
       const settings = JSON.parse(codeBlocks.find((content) => content.includes('"$schema"'))!)
 
-      expect(allCode).not.toContain('CLAUDE_CODE_ATTRIBUTION_HEADER')
+      expect(allCode).toContain(attributionSetting)
       expect(allCode).toContain(trafficSetting)
+      expect(settings.env.CLAUDE_CODE_ATTRIBUTION_HEADER).toBe('0')
       expect(settings.env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC).toBe('1')
-      expect(settings.env).not.toHaveProperty('CLAUDE_CODE_ATTRIBUTION_HEADER')
     }
   })
 
@@ -225,10 +225,10 @@ describe('UseKeyModal', () => {
     const parsedSettings = JSON.parse(settingsConfig!)
     expect(parsedSettings.$schema).toBe('https://json.schemastore.org/claude-code-settings.json')
     expect(parsedSettings.env.ANTHROPIC_MODEL).toBe('grok-4.5')
-    expect(codeBlocks.join('\n')).not.toContain('CLAUDE_CODE_ATTRIBUTION_HEADER')
+    expect(codeBlocks.join('\n')).toContain('export CLAUDE_CODE_ATTRIBUTION_HEADER="0"')
     expect(codeBlocks.join('\n')).toContain('CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC')
+    expect(parsedSettings.env.CLAUDE_CODE_ATTRIBUTION_HEADER).toBe('0')
     expect(parsedSettings.env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC).toBe('1')
-    expect(parsedSettings.env).not.toHaveProperty('CLAUDE_CODE_ATTRIBUTION_HEADER')
     expect(wrapper.text()).toContain('keys.useKeyModal.claudeSettingsHint')
     expect(wrapper.text()).toContain('keys.useKeyModal.grok.claudeNote')
     expect(wrapper.find('nav[aria-label="Client"]').classes()).toContain('min-w-max')
@@ -245,11 +245,11 @@ describe('UseKeyModal', () => {
     expect(codeBlocks.join('\n')).toContain('set ANTHROPIC_MODEL=grok-4.5')
     expect(codeBlocks.join('\n')).toContain('set ANTHROPIC_DEFAULT_FABLE_MODEL=grok-4.5')
     expect(codeBlocks.join('\n')).toContain('set CLAUDE_CODE_SUBAGENT_MODEL=grok-4.5')
+    expect(codeBlocks.join('\n')).toContain('set CLAUDE_CODE_ATTRIBUTION_HEADER=0')
     expect(codeBlocks.join('\n')).toContain('set CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1')
-    expect(codeBlocks.join('\n')).not.toContain('CLAUDE_CODE_ATTRIBUTION_HEADER')
     const cmdSettings = JSON.parse(codeBlocks.find((content) => content.includes('"$schema"'))!)
+    expect(cmdSettings.env.CLAUDE_CODE_ATTRIBUTION_HEADER).toBe('0')
     expect(cmdSettings.env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC).toBe('1')
-    expect(cmdSettings.env).not.toHaveProperty('CLAUDE_CODE_ATTRIBUTION_HEADER')
 
     const powershellTab = wrapper.findAll('button').find(
       (button) => button.text().trim() === 'PowerShell'
@@ -263,11 +263,11 @@ describe('UseKeyModal', () => {
     expect(codeBlocks.join('\n')).toContain('$env:ANTHROPIC_MODEL="grok-4.5"')
     expect(codeBlocks.join('\n')).toContain('$env:ANTHROPIC_DEFAULT_FABLE_MODEL="grok-4.5"')
     expect(codeBlocks.join('\n')).toContain('$env:CLAUDE_CODE_SUBAGENT_MODEL="grok-4.5"')
+    expect(codeBlocks.join('\n')).toContain('$env:CLAUDE_CODE_ATTRIBUTION_HEADER="0"')
     expect(codeBlocks.join('\n')).toContain('$env:CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1"')
-    expect(codeBlocks.join('\n')).not.toContain('CLAUDE_CODE_ATTRIBUTION_HEADER')
     const powershellSettings = JSON.parse(codeBlocks.find((content) => content.includes('"$schema"'))!)
+    expect(powershellSettings.env.CLAUDE_CODE_ATTRIBUTION_HEADER).toBe('0')
     expect(powershellSettings.env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC).toBe('1')
-    expect(powershellSettings.env).not.toHaveProperty('CLAUDE_CODE_ATTRIBUTION_HEADER')
     expect(wrapper.text()).toContain('%USERPROFILE%\\.claude\\settings.json')
 
     const copyButton = wrapper.findAll('button').find((button) =>
@@ -382,6 +382,45 @@ describe('UseKeyModal', () => {
     expect(codeBlocks).toContain('{\n  "OPENAI_API_KEY": "sk-test"\n}')
     expect(wrapper.text()).toContain('auth.json')
     expect(wrapper.find('[data-testid="codex-api-key-restart-notice"]').exists()).toBe(false)
+  })
+
+  it('normalizes OpenAI Codex and Claude base URLs independently', async () => {
+    const wrapper = mount(UseKeyModal, {
+      props: {
+        show: true,
+        apiKey: 'sk-test',
+        baseUrl: 'https://example.com',
+        platform: 'openai',
+        allowMessagesDispatch: true
+      },
+      global: {
+        stubs: {
+          BaseDialog: {
+            template: '<div><slot /><slot name="footer" /></div>'
+          },
+          Icon: {
+            template: '<span />'
+          }
+        }
+      }
+    })
+
+    const codexConfig = wrapper.findAll('pre code')
+      .map((code) => code.text())
+      .find((content) => content.includes('model_provider = "OpenAI"'))
+    expect(codexConfig).toContain('base_url = "https://example.com/v1"')
+
+    const claudeTab = wrapper.findAll('button').find((button) =>
+      button.text().includes('keys.useKeyModal.cliTabs.claudeCode')
+    )
+    expect(claudeTab).toBeDefined()
+    await claudeTab!.trigger('click')
+    await nextTick()
+
+    const claudeConfig = wrapper.findAll('pre code')
+      .map((code) => code.text())
+      .find((content) => content.startsWith('export ANTHROPIC_BASE_URL'))
+    expect(claudeConfig).toContain('ANTHROPIC_BASE_URL="https://example.com"')
   })
 
   it('renders API Key Mode authorization in OpenAI Codex config', async () => {
@@ -629,12 +668,14 @@ describe('UseKeyModal', () => {
 
     const parsed = JSON.parse(wrapper.find('pre code').text())
     const models = parsed.provider.openai.models
-    for (const model of ['gpt-5.6', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna']) {
+    for (const model of ['gpt-5.6', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-6-sol', 'gpt-6-luna']) {
       expect(models[model]).toBeDefined()
       expect(models[model].variants).toHaveProperty('max')
       expect(models[model].variants).toHaveProperty('xhigh')
     }
     expect(models['gpt-5.6'].name).toBe('GPT-5.6 (Sol)')
+    expect(models['gpt-6-sol'].variants).toHaveProperty('none')
+    expect(models['gpt-6-luna'].limit).toEqual({ context: 1050000, output: 128000 })
     expect(models['gpt-6']).toEqual({
       name: 'GPT-6 (Astra)',
       limit: { context: 1050000, output: 128000 },
@@ -647,6 +688,22 @@ describe('UseKeyModal', () => {
       options: { store: false },
       variants: { low: {}, medium: {}, high: {}, xhigh: {}, max: {} }
     })
+  })
+
+  it('exports Opus 5.5 only on the Anthropic provider with adaptive defaults', async () => {
+    const wrapper = mount(UseKeyModal, {
+      props: { show: true, apiKey: 'sk-test', baseUrl: 'https://example.com/v1', platform: 'anthropic' },
+      global: { stubs: { BaseDialog: { template: '<div><slot /><slot name="footer" /></div>' }, Icon: { template: '<span />' } } }
+    })
+    const tab = wrapper.findAll('button').find(button => button.text().includes('keys.useKeyModal.cliTabs.opencode'))
+    expect(tab).toBeDefined()
+    await tab!.trigger('click')
+    await nextTick()
+    const model = JSON.parse(wrapper.find('pre code').text()).provider.anthropic.models['claude-opus-5-5']
+    expect(model.limit).toEqual({ context: 1000000, output: 128000 })
+    expect(model.options).toEqual({ thinking: { type: 'adaptive' }, effort: 'medium' })
+    expect(model.variants.xhigh.effort).toBe('xhigh')
+    expect(model.variants).not.toHaveProperty('none')
   })
 
   it('renders Claude Fable 5 OpenCode config with adaptive thinking', async () => {
@@ -796,7 +853,7 @@ describe('UseKeyModal', () => {
     )
   })
 
-  it.each(['anthropic', 'gemini', 'antigravity', 'kimi', 'zhipu'] as const)(
+  it.each(['anthropic', 'gemini', 'antigravity', 'kimi', 'zhipu', 'minimax'] as const)(
     'offers Codex catalog configuration for the %s routed group',
     async (platform) => {
       const wrapper = mount(UseKeyModal, {

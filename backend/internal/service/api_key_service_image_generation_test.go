@@ -69,13 +69,19 @@ func TestImageGenerationModelsForAccountsUsesFiniteDefaultsForOpenMappings(t *te
 
 	models := imageGenerationModelsForAccounts(&Group{Platform: PlatformOpenAI}, accounts)
 
-	require.Equal(t, []string{"gpt-image-2", "gpt-image-1.5", "gpt-image-1"}, models)
+	require.Equal(t, []string{
+		"gpt-image-2",
+		"gpt-image-1.5",
+		"gpt-image-1",
+		"gpt-image-2.5-flare",
+		"gpt-image-2.5-sunburst",
+	}, models)
 }
 
 func TestImageGenerationModelsForAccountsHonorsCustomListAndDispatchability(t *testing.T) {
 	group := &Group{
 		Platform: PlatformOpenAI,
-		ModelsListConfig: GroupModelsListConfig{
+		ModelAllowlist: GroupModelAllowlist{
 			Enabled: true,
 			Models:  []string{"studio", "qwen-image", "gpt-image-*", "studio"},
 		},

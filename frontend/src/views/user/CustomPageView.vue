@@ -95,7 +95,7 @@
 
         <!-- Iframe embed mode -->
         <div v-else class="custom-embed-shell">
-          <div class="custom-embed-toolbar">
+          <div v-if="!menuItem?.hide_open_button" class="custom-embed-toolbar">
             <a
               :href="embeddedUrl"
               target="_blank"

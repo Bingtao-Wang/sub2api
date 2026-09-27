@@ -26,6 +26,7 @@ const (
 	OpenAIManagedMediaAudioSpeech    OpenAIManagedMediaEndpoint = "audio_speech"
 	OpenAIManagedMediaSeedanceCreate OpenAIManagedMediaEndpoint = "seedance_create"
 	OpenAIManagedMediaSeedanceStatus OpenAIManagedMediaEndpoint = "seedance_status"
+	OpenAIManagedMediaSeedanceDelete OpenAIManagedMediaEndpoint = "seedance_delete"
 )
 
 func (e OpenAIManagedMediaEndpoint) Capability() OpenAIEndpointCapability {
@@ -36,7 +37,7 @@ func (e OpenAIManagedMediaEndpoint) Capability() OpenAIEndpointCapability {
 }
 
 func (e OpenAIManagedMediaEndpoint) RequiresBody() bool {
-	return e != OpenAIManagedMediaSeedanceStatus
+	return e == OpenAIManagedMediaAudioSpeech || e == OpenAIManagedMediaSeedanceCreate
 }
 
 func (e OpenAIManagedMediaEndpoint) IsBillable() bool {
@@ -56,7 +57,7 @@ func (e OpenAIManagedMediaEndpoint) upstreamPath(taskID string) string {
 		return "/v1/audio/speech"
 	case OpenAIManagedMediaSeedanceCreate:
 		return "/v1/contents/generations/tasks"
-	case OpenAIManagedMediaSeedanceStatus:
+	case OpenAIManagedMediaSeedanceStatus, OpenAIManagedMediaSeedanceDelete:
 		return "/v1/contents/generations/tasks/" + strings.TrimSpace(taskID)
 	default:
 		return ""
@@ -142,15 +143,64 @@ func OpenAIManagedMediaModerationBody(endpoint OpenAIManagedMediaEndpoint, body 
 	return moderationBody
 }
 
-func OpenAIManagedMediaTaskSessionHash(taskID string) string {
-	if taskID = strings.TrimSpace(taskID); taskID != "" {
-		return "seedance-task:" + DeriveSessionHashFromSeed(taskID)
+const openAIManagedMediaTaskOwnershipTTL = 24 * time.Hour
+
+// OpenAIManagedMediaTaskSessionHash scopes PeterAI's managed v1 task ownership
+// to the authenticated principal. Its namespace is deliberately distinct from
+// GrokMediaVideoRequestSessionHash, which also backs native Seedance v3 tasks.
+// A task created through one lifecycle therefore cannot be looked up through
+// the other, even when the upstream happens to return the same task ID.
+func OpenAIManagedMediaTaskSessionHash(taskID string, userID, apiKeyID int64) string {
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" || userID <= 0 || apiKeyID <= 0 {
+		return ""
 	}
-	return ""
+	ownerSeed := fmt.Sprintf("%d:%d:%s", userID, apiKeyID, taskID)
+	return "managed-seedance:" + DeriveSessionHashFromSeed(ownerSeed)
 }
 
-func (s *OpenAIGatewayService) BindOpenAIManagedMediaTaskAccount(ctx context.Context, groupID *int64, taskID string, accountID int64) error {
-	return s.BindStickySession(ctx, groupID, OpenAIManagedMediaTaskSessionHash(taskID), accountID)
+// BindOpenAIManagedMediaTaskAccount durably records the account that owns a
+// managed v1 Seedance task. Async jobs can outlive the normal sticky-session
+// window, so the ownership TTL is at least one day.
+func (s *OpenAIGatewayService) BindOpenAIManagedMediaTaskAccount(
+	ctx context.Context,
+	groupID *int64,
+	taskID string,
+	userID, apiKeyID, accountID int64,
+) error {
+	if s == nil || s.cache == nil {
+		return errors.New("managed Seedance task ownership cache is unavailable")
+	}
+	cacheKey := s.openAISessionCacheKey(OpenAIManagedMediaTaskSessionHash(taskID, userID, apiKeyID))
+	if cacheKey == "" || accountID <= 0 {
+		return errors.New("managed Seedance task ownership is invalid")
+	}
+	ttl := openAIManagedMediaTaskOwnershipTTL
+	if s.cfg != nil && s.cfg.Gateway.OpenAIWS.StickySessionTTLSeconds > 0 {
+		if sticky := time.Duration(s.cfg.Gateway.OpenAIWS.StickySessionTTLSeconds) * time.Second; sticky > ttl {
+			ttl = sticky
+		}
+	}
+	return s.cache.SetSessionAccountID(ctx, derefGroupID(groupID), cacheKey, accountID, ttl)
+}
+
+// ResolveOpenAIManagedMediaTaskAccount returns only the account bound by a
+// managed v1 create for this user and API key. Missing or foreign ownership is
+// intentionally surfaced as an error so callers can fail closed with 404.
+func (s *OpenAIGatewayService) ResolveOpenAIManagedMediaTaskAccount(
+	ctx context.Context,
+	groupID *int64,
+	taskID string,
+	userID, apiKeyID int64,
+) (int64, error) {
+	if s == nil || s.cache == nil {
+		return 0, errors.New("managed Seedance task ownership cache is unavailable")
+	}
+	cacheKey := s.openAISessionCacheKey(OpenAIManagedMediaTaskSessionHash(taskID, userID, apiKeyID))
+	if cacheKey == "" {
+		return 0, errors.New("managed Seedance task ownership is invalid")
+	}
+	return s.cache.GetSessionAccountID(ctx, derefGroupID(groupID), cacheKey)
 }
 
 // ValidateOpenAIManagedMediaPricing 在调用上游前强制要求站内有明确价格。
@@ -232,7 +282,9 @@ func (s *OpenAIGatewayService) ForwardOpenAIManagedMedia(
 
 	var bodyReader io.Reader
 	method := http.MethodGet
-	if endpoint.RequiresBody() {
+	if endpoint == OpenAIManagedMediaSeedanceDelete {
+		method = http.MethodDelete
+	} else if endpoint.RequiresBody() {
 		method = http.MethodPost
 		bodyReader = bytes.NewReader(upstreamBody)
 	}
@@ -313,7 +365,7 @@ func (s *OpenAIGatewayService) handleOpenAIManagedMediaError(ctx context.Context
 		message = fmt.Sprintf("upstream returned status %d", resp.StatusCode)
 	}
 	setOpsUpstreamError(c, resp.StatusCode, message, "")
-	if s.shouldFailoverOpenAIUpstreamResponse(resp.StatusCode, message, body) {
+	if s.shouldFailoverOpenAIUpstreamResponse(account, resp.StatusCode, message, body) {
 		s.handleOpenAIAccountUpstreamError(ctx, account, resp.StatusCode, resp.Header, body, model)
 		return nil, &UpstreamFailoverError{
 			StatusCode:             resp.StatusCode,

@@ -35,6 +35,10 @@ func TestNormalizeInboundEndpoint(t *testing.T) {
 		{"/v1/images/tasks/imgtask_123", EndpointImageTasks},
 		{"/v1/videos/generations", EndpointVideosGenerations},
 		{"/v1/videos/req_123", EndpointVideos},
+		{"/v1/contents/generations/tasks", EndpointContentTasks},
+		{"/api/v3/contents/generations/tasks", EndpointSeedanceTasks},
+		{"/v3/contents/generations/tasks/task-1", EndpointSeedanceTasks},
+		{"/contents/generations/tasks", EndpointSeedanceTasks},
 		{"/v1beta/models", EndpointGeminiModels},
 
 		// Prefixed paths (antigravity, openai) — root Responses.
@@ -131,6 +135,8 @@ func TestDeriveUpstreamEndpoint(t *testing.T) {
 		{"openai alpha search", EndpointAlphaSearch, "/backend-api/codex/alpha/search", service.PlatformOpenAI, EndpointAlphaSearch},
 		{"openai image generations", EndpointImagesGenerations, "/v1/images/generations", service.PlatformOpenAI, EndpointImagesGenerations},
 		{"openai image edits", EndpointImagesEdits, "/openai/v1/images/edits", service.PlatformOpenAI, EndpointImagesEdits},
+		{"openai managed seedance", EndpointContentTasks, "/v1/contents/generations/tasks", service.PlatformOpenAI, EndpointContentTasks},
+		{"openai native seedance", EndpointSeedanceTasks, "/api/v3/contents/generations/tasks", service.PlatformOpenAI, EndpointSeedanceTasks},
 		{"grok chat defaults to responses without runtime result", EndpointChatCompletions, "/v1/chat/completions", service.PlatformGrok, EndpointResponses},
 		{"grok responses", EndpointResponses, "/v1/responses", service.PlatformGrok, EndpointResponses},
 		{"grok video generations", EndpointVideosGenerations, "/v1/videos/generations", service.PlatformGrok, EndpointVideosGenerations},
@@ -232,6 +238,18 @@ func TestResolveOpenAIUpstreamEndpointPrefersForwardResult(t *testing.T) {
 			account: &service.Account{Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth},
 			result:  &service.OpenAIForwardResult{},
 			want:    EndpointResponses,
+		},
+		{
+			name:    "opencode go conversion result reports responses",
+			account: &service.Account{Platform: service.PlatformOpenCodeGo, Type: service.AccountTypeAPIKey},
+			result:  &service.OpenAIForwardResult{UpstreamEndpoint: EndpointResponses},
+			want:    EndpointResponses,
+		},
+		{
+			name:    "opencode go empty result without runtime stays inbound",
+			account: &service.Account{Platform: service.PlatformOpenCodeGo, Type: service.AccountTypeAPIKey},
+			result:  &service.OpenAIForwardResult{},
+			want:    EndpointChatCompletions,
 		},
 	}
 

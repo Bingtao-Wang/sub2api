@@ -29,6 +29,10 @@ func (h *OpenAIGatewayHandler) SeedanceStatus(c *gin.Context) {
 	h.handleOpenAIManagedMedia(c, service.OpenAIManagedMediaSeedanceStatus, c.Param("task_id"))
 }
 
+func (h *OpenAIGatewayHandler) SeedanceDelete(c *gin.Context) {
+	h.handleOpenAIManagedMedia(c, service.OpenAIManagedMediaSeedanceDelete, c.Param("task_id"))
+}
+
 func (h *OpenAIGatewayHandler) handleOpenAIManagedMedia(c *gin.Context, endpoint service.OpenAIManagedMediaEndpoint, taskID string) {
 	streamStarted := false
 	defer h.recoverResponsesPanic(c, &streamStarted)
@@ -76,7 +80,8 @@ func (h *OpenAIGatewayHandler) handleOpenAIManagedMedia(c *gin.Context, endpoint
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 		return
 	}
-	if endpoint == service.OpenAIManagedMediaSeedanceStatus && strings.TrimSpace(taskID) == "" {
+	isSeedanceLookup := endpoint == service.OpenAIManagedMediaSeedanceStatus || endpoint == service.OpenAIManagedMediaSeedanceDelete
+	if isSeedanceLookup && strings.TrimSpace(taskID) == "" {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "task_id is required")
 		return
 	}
@@ -125,8 +130,17 @@ func (h *OpenAIGatewayHandler) handleOpenAIManagedMedia(c *gin.Context, endpoint
 	}
 
 	sessionHash := h.gatewayService.GenerateExplicitSessionHash(c, body)
-	if endpoint == service.OpenAIManagedMediaSeedanceStatus {
-		sessionHash = service.OpenAIManagedMediaTaskSessionHash(taskID)
+	boundLookupAccountID := int64(0)
+	if isSeedanceLookup {
+		sessionHash = service.OpenAIManagedMediaTaskSessionHash(taskID, subject.UserID, apiKey.ID)
+		boundLookupAccountID, err = h.gatewayService.ResolveOpenAIManagedMediaTaskAccount(
+			c.Request.Context(), apiKey.GroupID, taskID, subject.UserID, apiKey.ID,
+		)
+		if err != nil || boundLookupAccountID <= 0 {
+			reqLog.Info("managed_media.task_owner_binding_missing", zap.String("task_id", taskID), zap.Error(err))
+			h.errorResponse(c, http.StatusNotFound, "not_found_error", "Seedance task not found")
+			return
+		}
 	}
 	requestCtx := c.Request.Context()
 	failedAccountIDs := make(map[int64]struct{})
@@ -140,20 +154,32 @@ func (h *OpenAIGatewayHandler) handleOpenAIManagedMedia(c *gin.Context, endpoint
 	routingStartedAt := time.Now()
 
 	for {
-		selection, _, err := h.gatewayService.SelectAccountWithSchedulerForCapability(
-			requestCtx,
-			apiKey.GroupID,
-			"",
-			sessionHash,
-			requestModel,
-			failedAccountIDs,
-			service.OpenAIUpstreamTransportHTTPSSE,
-			endpoint.Capability(),
-			false,
-			false,
-			false,
-		)
+		var selection *service.AccountSelectionResult
+		if boundLookupAccountID > 0 {
+			selection, _, err = h.gatewayService.SelectMediaVideoRequestAccount(
+				requestCtx, apiKey.GroupID, sessionHash, boundLookupAccountID, requestModel, service.PlatformOpenAI,
+			)
+		} else {
+			selection, _, err = h.gatewayService.SelectAccountWithSchedulerForCapability(
+				requestCtx,
+				apiKey.GroupID,
+				"",
+				sessionHash,
+				requestModel,
+				failedAccountIDs,
+				service.OpenAIUpstreamTransportHTTPSSE,
+				endpoint.Capability(),
+				false,
+				false,
+				false,
+			)
+		}
 		if err != nil || selection == nil || selection.Account == nil {
+			if boundLookupAccountID > 0 {
+				reqLog.Info("managed_media.bound_task_account_unavailable", zap.Int64("account_id", boundLookupAccountID), zap.Error(err))
+				h.errorResponse(c, http.StatusNotFound, "not_found_error", "Seedance task not found")
+				return
+			}
 			if len(failedAccountIDs) == 0 {
 				message := "No PeterAI account is configured for this media endpoint"
 				h.errorResponse(c, http.StatusServiceUnavailable, "no_available_account", message)
@@ -168,8 +194,22 @@ func (h *OpenAIGatewayHandler) handleOpenAIManagedMedia(c *gin.Context, endpoint
 		}
 
 		account := selection.Account
+		if boundLookupAccountID > 0 && account.ID != boundLookupAccountID {
+			reqLog.Warn("managed_media.bound_task_account_mismatch",
+				zap.Int64("bound_account_id", boundLookupAccountID),
+				zap.Int64("selected_account_id", account.ID),
+			)
+			h.errorResponse(c, http.StatusNotFound, "not_found_error", "Seedance task not found")
+			return
+		}
 		setOpsSelectedAccount(c, account.ID, account.Platform)
-		accountRelease, accountAcquired := h.acquireResponsesAccountSlot(c, apiKey.GroupID, sessionHash, selection, false, &streamStarted, reqLog)
+		admissionSessionHash := sessionHash
+		if boundLookupAccountID > 0 {
+			// Do not let an ordinary request slot refresh replace the durable task
+			// ownership TTL or mutate its bound account.
+			admissionSessionHash = ""
+		}
+		accountRelease, accountAcquired := h.acquireResponsesAccountSlot(c, apiKey.GroupID, admissionSessionHash, selection, false, &streamStarted, reqLog)
 		if accountAcquired != openAISlotAcquireOK {
 			return
 		}
@@ -189,6 +229,13 @@ func (h *OpenAIGatewayHandler) handleOpenAIManagedMedia(c *gin.Context, endpoint
 				h.gatewayService.ReportOpenAIAccountScheduleResult(account, account.GetMappedModel(requestModel), false, nil, forwardErr)
 				if c.Writer.Size() != writerSizeBefore {
 					h.handleFailoverExhausted(c, failoverErr, true)
+					return
+				}
+				if boundLookupAccountID > 0 {
+					// Managed lookups/deletes are pinned to their creator account.
+					// Escaping to another account would violate ownership and can expose
+					// an unrelated task with the same upstream identifier.
+					h.handleFailoverExhausted(c, failoverErr, false)
 					return
 				}
 				if failoverErr.RetryableOnSameAccount {
@@ -222,7 +269,9 @@ func (h *OpenAIGatewayHandler) handleOpenAIManagedMedia(c *gin.Context, endpoint
 
 		h.gatewayService.ReportOpenAIAccountScheduleResult(account, account.GetMappedModel(requestModel), true, nil)
 		if endpoint == service.OpenAIManagedMediaSeedanceCreate && result != nil && strings.TrimSpace(result.ResponseID) != "" {
-			if err := h.gatewayService.BindOpenAIManagedMediaTaskAccount(requestCtx, apiKey.GroupID, result.ResponseID, account.ID); err != nil {
+			if err := h.gatewayService.BindOpenAIManagedMediaTaskAccount(
+				requestCtx, apiKey.GroupID, result.ResponseID, subject.UserID, apiKey.ID, account.ID,
+			); err != nil {
 				reqLog.Warn("managed_media.bind_task_account_failed", zap.String("task_id", result.ResponseID), zap.Error(err))
 			}
 		}

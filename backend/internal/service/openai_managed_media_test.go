@@ -124,7 +124,7 @@ func TestForwardOpenAIManagedMediaSeedanceRejectsMissingTaskID(t *testing.T) {
 func TestValidateOpenAIManagedMediaPricingRequiresExplicitPeterPrice(t *testing.T) {
 	groupID := int64(7)
 	channel := &Channel{ID: 3, Status: StatusActive}
-	channelService := NewChannelService(nil, nil, nil, nil)
+	channelService := NewChannelService(nil, nil, nil, nil, nil)
 	cache := &channelCache{
 		pricingByGroupModel:     map[channelModelKey]*ChannelModelPricing{},
 		wildcardByGroupPlatform: map[channelGroupPlatformKey][]*wildcardPricingEntry{},
@@ -168,4 +168,97 @@ func TestValidateOpenAIManagedMediaPricingRequiresExplicitPeterPrice(t *testing.
 	apiKey.Group.VideoPrice1080P = &price1080
 	require.NoError(t, svc.ValidateOpenAIManagedMediaPricing(context.Background(), apiKey, OpenAIManagedMediaSeedanceCreate, "seedance", "", "1080p", false))
 	require.Error(t, svc.ValidateOpenAIManagedMediaPricing(context.Background(), apiKey, OpenAIManagedMediaSeedanceCreate, "seedance", "", "1080p", true))
+}
+
+type managedMediaOwnershipCache struct {
+	stubGatewayCache
+	ttl time.Duration
+}
+
+func (c *managedMediaOwnershipCache) SetSessionAccountID(ctx context.Context, groupID int64, sessionHash string, accountID int64, ttl time.Duration) error {
+	c.ttl = ttl
+	return c.stubGatewayCache.SetSessionAccountID(ctx, groupID, sessionHash, accountID, ttl)
+}
+
+func TestOpenAIManagedMediaTaskOwnershipIsPrincipalAndLifecycleScoped(t *testing.T) {
+	groupID := int64(7)
+	cache := &managedMediaOwnershipCache{}
+	svc := &OpenAIGatewayService{cache: cache, cfg: &config.Config{}}
+
+	require.NoError(t, svc.BindOpenAIManagedMediaTaskAccount(
+		context.Background(), &groupID, "task-managed", 11, 22, 33,
+	))
+	require.GreaterOrEqual(t, cache.ttl, 24*time.Hour)
+	accountID, err := svc.ResolveOpenAIManagedMediaTaskAccount(
+		context.Background(), &groupID, "task-managed", 11, 22,
+	)
+	require.NoError(t, err)
+	require.Equal(t, int64(33), accountID)
+
+	for _, tc := range []struct {
+		name     string
+		taskID   string
+		userID   int64
+		apiKeyID int64
+	}{
+		{name: "task", taskID: "task-other", userID: 11, apiKeyID: 22},
+		{name: "user", taskID: "task-managed", userID: 12, apiKeyID: 22},
+		{name: "api key", taskID: "task-managed", userID: 11, apiKeyID: 23},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, resolveErr := svc.ResolveOpenAIManagedMediaTaskAccount(
+				context.Background(), &groupID, tc.taskID, tc.userID, tc.apiKeyID,
+			)
+			require.Error(t, resolveErr)
+		})
+	}
+
+	// Native v3 stores the same upstream ID under a different ownership
+	// namespace. A v1 lookup must not accept that binding.
+	require.NoError(t, svc.BindGrokMediaVideoRequestAccount(
+		context.Background(), &groupID, "task-native", 11, 22, 44,
+	))
+	_, err = svc.ResolveOpenAIManagedMediaTaskAccount(
+		context.Background(), &groupID, "task-native", 11, 22,
+	)
+	require.Error(t, err)
+	require.NotEqual(t,
+		OpenAIManagedMediaTaskSessionHash("same-task", 11, 22),
+		GrokMediaVideoRequestSessionHash("same-task", 11, 22),
+	)
+}
+
+func TestForwardOpenAIManagedMediaSeedanceLookupMethods(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, tc := range []struct {
+		name     string
+		endpoint OpenAIManagedMediaEndpoint
+		method   string
+	}{
+		{name: "status", endpoint: OpenAIManagedMediaSeedanceStatus, method: http.MethodGet},
+		{name: "delete", endpoint: OpenAIManagedMediaSeedanceDelete, method: http.MethodDelete},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(recorder)
+			c.Request = httptest.NewRequest(tc.method, "/v1/contents/generations/tasks/task-123", nil)
+			upstream := &httpUpstreamRecorder{resp: &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Body:       io.NopCloser(strings.NewReader(`{"id":"task-123","status":"running"}`)),
+			}}
+			svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
+			account := &Account{ID: 43, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Credentials: map[string]any{
+				"api_key": "ark-test", "base_url": "https://ark.example/api/plan/v3", "openai_capabilities": []any{"seedance"},
+			}}
+
+			_, err := svc.ForwardOpenAIManagedMedia(
+				context.Background(), c, account, tc.endpoint, "task-123", nil, OpenAIManagedMediaRequest{}, "",
+			)
+
+			require.NoError(t, err)
+			require.Equal(t, tc.method, upstream.lastReq.Method)
+			require.Equal(t, "https://ark.example/api/plan/v3/contents/generations/tasks/task-123", upstream.lastReq.URL.String())
+		})
+	}
 }

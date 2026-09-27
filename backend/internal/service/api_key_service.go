@@ -747,9 +747,9 @@ func (s *APIKeyService) imageGenerationModelsForGroup(ctx context.Context, group
 func imageGenerationModelsForAccounts(group *Group, accounts []Account) []string {
 	eligible := make([]*Account, 0, len(accounts))
 	candidates := make(map[string]struct{})
-	customListEnabled := group != nil && group.CustomModelsListEnabled()
+	customListEnabled := group != nil && group.ModelAllowlistEnabled()
 	if customListEnabled {
-		for _, model := range group.ModelsListConfig.Models {
+		for _, model := range group.ModelAllowlist.Models {
 			if model = strings.TrimSpace(model); model != "" && !strings.Contains(model, "*") {
 				candidates[model] = struct{}{}
 			}
@@ -789,7 +789,7 @@ func imageGenerationModelsForAccounts(group *Group, accounts []Account) []string
 				continue
 			}
 			mapped := strings.TrimSpace(account.GetMappedModel(candidate))
-			if isOpenAIImageGenerationModel(candidate) || isOpenAIImageGenerationModel(mapped) {
+			if isCompatibleOpenAIImageAlias(candidate) || isCompatibleOpenAIImageAlias(mapped) {
 				models = append(models, candidate)
 				break
 			}
@@ -1318,11 +1318,11 @@ func (s *APIKeyService) SearchAPIKeys(ctx context.Context, userID int64, keyword
 	return keys, nil
 }
 
-// GetUserGroupVisibility 返回 user_allowed_groups 授权给该用户的分组 ID 集合，
+// GetUserGroupVisibility 返回 user_allowed_groups 授权及有效订阅的分组 ID 集合，
 // 以及该用户是否开启了公开分组限制。开启时公开分组的可见性也要落在该集合内。
 //
-// 与 GetAvailableGroups 的区别：这里是「橱窗」语义（模型广场用），不检查订阅有效性，
-// 也不关心分组是否活跃——仅回答"哪些专属分组对该用户可见"。返回值恒非 nil。
+// 与 GetAvailableGroups 的区别：这里保留普通授权分组的「橱窗」语义，不检查
+// 分组是否活跃；有效订阅也授予对应分组的可见性。返回值恒非 nil。
 func (s *APIKeyService) GetUserGroupVisibility(ctx context.Context, userID int64) (map[int64]struct{}, bool, error) {
 	user, err := s.userRepo.GetByID(ctx, userID)
 	if err != nil {
@@ -1331,6 +1331,13 @@ func (s *APIKeyService) GetUserGroupVisibility(ctx context.Context, userID int64
 	allowed := make(map[int64]struct{}, len(user.AllowedGroups))
 	for _, id := range user.AllowedGroups {
 		allowed[id] = struct{}{}
+	}
+	subscriptions, err := s.userSubRepo.ListActiveByUserID(ctx, userID)
+	if err != nil {
+		return nil, false, fmt.Errorf("list active subscriptions: %w", err)
+	}
+	for _, sub := range subscriptions {
+		allowed[sub.GroupID] = struct{}{}
 	}
 	return allowed, user.RestrictPublicGroups, nil
 }

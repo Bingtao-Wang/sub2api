@@ -75,7 +75,7 @@ func normalizeBulkOpenAIEndpointCapabilities(raw any) (any, bool, error) {
 		return nil, true, nil
 	}
 
-	values := make([]string, 0, 2)
+	values := make([]string, 0, 4)
 	switch typed := raw.(type) {
 	case []any:
 		for _, item := range typed {
@@ -91,10 +91,13 @@ func normalizeBulkOpenAIEndpointCapabilities(raw any) (any, bool, error) {
 		return nil, false, invalidBulkOpenAIEndpointCapabilities()
 	}
 
-	selected := make(map[string]bool, 2)
+	selected := make(map[string]bool, 4)
 	for _, value := range values {
 		switch OpenAIEndpointCapability(value) {
-		case OpenAIEndpointCapabilityChatCompletions, OpenAIEndpointCapabilityEmbeddings:
+		case OpenAIEndpointCapabilityChatCompletions,
+			OpenAIEndpointCapabilityEmbeddings,
+			OpenAIEndpointCapabilityAudioSpeech,
+			OpenAIEndpointCapabilitySeedance:
 			selected[value] = true
 		default:
 			return nil, false, invalidBulkOpenAIEndpointCapabilities()
@@ -105,19 +108,31 @@ func normalizeBulkOpenAIEndpointCapabilities(raw any) (any, bool, error) {
 	}
 
 	includeChat := selected[string(OpenAIEndpointCapabilityChatCompletions)]
-	if includeChat && selected[string(OpenAIEndpointCapabilityEmbeddings)] {
+	includeEmbeddings := selected[string(OpenAIEndpointCapabilityEmbeddings)]
+	includeAudio := selected[string(OpenAIEndpointCapabilityAudioSpeech)]
+	includeSeedance := selected[string(OpenAIEndpointCapabilitySeedance)]
+	if includeChat && includeEmbeddings && !includeAudio && !includeSeedance {
 		return nil, true, nil
 	}
-	if includeChat {
-		return []string{string(OpenAIEndpointCapabilityChatCompletions)}, true, nil
+
+	normalized := make([]string, 0, len(selected))
+	for _, capability := range []OpenAIEndpointCapability{
+		OpenAIEndpointCapabilityChatCompletions,
+		OpenAIEndpointCapabilityEmbeddings,
+		OpenAIEndpointCapabilityAudioSpeech,
+		OpenAIEndpointCapabilitySeedance,
+	} {
+		if selected[string(capability)] {
+			normalized = append(normalized, string(capability))
+		}
 	}
-	return []string{string(OpenAIEndpointCapabilityEmbeddings)}, false, nil
+	return normalized, includeChat, nil
 }
 
 func invalidBulkOpenAIEndpointCapabilities() error {
 	return infraerrors.BadRequest(
 		"OPENAI_ENDPOINT_CAPABILITIES_INVALID",
-		"openai_capabilities must contain chat_completions, embeddings, or both",
+		"openai_capabilities must contain chat_completions, embeddings, audio_speech, or seedance",
 	)
 }
 
