@@ -95,6 +95,7 @@ func (h *OpenAIGatewayHandler) handleOpenAIManagedMedia(c *gin.Context, endpoint
 		}
 	}
 	channelMapping, _ := h.gatewayService.ResolveChannelMappingAndRestrict(c.Request.Context(), apiKey.GroupID, requestModel)
+	forwardModel := openAIChannelForwardModel(channelMapping, requestModel)
 	if endpoint.IsBillable() {
 		if err := h.gatewayService.ValidateOpenAIManagedMediaPricing(c.Request.Context(), apiKey, endpoint, requestModel, channelMapping.MappedModel, request.Resolution, request.DurationAuto); err != nil {
 			reqLog.Warn("managed_media.pricing_not_configured", zap.String("model", requestModel), zap.Error(err))
@@ -127,6 +128,28 @@ func (h *OpenAIGatewayHandler) handleOpenAIManagedMedia(c *gin.Context, endpoint
 			h.errorResponse(c, status, code, message)
 			return
 		}
+
+		// Keep managed Audio/Seedance creates under the same in-flight balance
+		// protection as the upstream media endpoints. The request context carries
+		// the reservation into the mandatory usage task, which releases it only
+		// after the balance cache has been updated.
+		inflightDone, inflightErr := reserveInflightBalance(
+			c,
+			h.billingCacheService,
+			h.gatewayService,
+			apiKey,
+			subscription,
+			openAIManagedMediaInflightEstimate(endpoint, requestModel, request, body),
+		)
+		if inflightErr != nil {
+			status, code, message, retryAfter := billingErrorDetails(inflightErr)
+			if retryAfter > 0 {
+				c.Header("Retry-After", strconv.Itoa(retryAfter))
+			}
+			h.errorResponse(c, status, code, message)
+			return
+		}
+		defer inflightDone()
 	}
 
 	sessionHash := h.gatewayService.GenerateExplicitSessionHash(c, body)
@@ -165,7 +188,7 @@ func (h *OpenAIGatewayHandler) handleOpenAIManagedMedia(c *gin.Context, endpoint
 				apiKey.GroupID,
 				"",
 				sessionHash,
-				requestModel,
+				forwardModel,
 				failedAccountIDs,
 				service.OpenAIUpstreamTransportHTTPSSE,
 				endpoint.Capability(),
@@ -226,7 +249,7 @@ func (h *OpenAIGatewayHandler) handleOpenAIManagedMedia(c *gin.Context, endpoint
 		if forwardErr != nil {
 			var failoverErr *service.UpstreamFailoverError
 			if errors.As(forwardErr, &failoverErr) {
-				h.gatewayService.ReportOpenAIAccountScheduleResult(account, account.GetMappedModel(requestModel), false, nil, forwardErr)
+				h.gatewayService.ReportOpenAIAccountScheduleResult(account, openAIAccountScheduleModel(c, account, forwardModel, false, result), false, nil, forwardErr)
 				if c.Writer.Size() != writerSizeBefore {
 					h.handleFailoverExhausted(c, failoverErr, true)
 					return
@@ -259,7 +282,7 @@ func (h *OpenAIGatewayHandler) handleOpenAIManagedMedia(c *gin.Context, endpoint
 				switchCount++
 				continue
 			}
-			h.gatewayService.ReportOpenAIAccountScheduleResult(account, account.GetMappedModel(requestModel), false, nil, forwardErr)
+			h.gatewayService.ReportOpenAIAccountScheduleResult(account, openAIAccountScheduleModel(c, account, forwardModel, false, result), false, nil, forwardErr)
 			if c.Writer.Size() == writerSizeBefore {
 				h.errorResponse(c, http.StatusBadGateway, "upstream_error", "Upstream request failed")
 			}
@@ -267,7 +290,7 @@ func (h *OpenAIGatewayHandler) handleOpenAIManagedMedia(c *gin.Context, endpoint
 			return
 		}
 
-		h.gatewayService.ReportOpenAIAccountScheduleResult(account, account.GetMappedModel(requestModel), true, nil)
+		h.gatewayService.ReportOpenAIAccountScheduleResult(account, openAIAccountScheduleModel(c, account, forwardModel, false, result), true, nil)
 		if endpoint == service.OpenAIManagedMediaSeedanceCreate && result != nil && strings.TrimSpace(result.ResponseID) != "" {
 			if err := h.gatewayService.BindOpenAIManagedMediaTaskAccount(
 				requestCtx, apiKey.GroupID, result.ResponseID, subject.UserID, apiKey.ID, account.ID,
@@ -295,8 +318,9 @@ func recordOpenAIManagedMediaUsage(
 	body []byte,
 	channelUsage service.ChannelUsageFields,
 ) {
+	usageResult := openAIManagedMediaUsageResult(result, channelUsage.BillingModelSource)
 	input := &service.OpenAIRecordUsageInput{
-		Result:             result,
+		Result:             usageResult,
 		APIKey:             apiKey,
 		User:               apiKey.User,
 		Account:            account,
@@ -322,4 +346,15 @@ func recordOpenAIManagedMediaUsage(
 			reqLog.Debug("managed_media.record_usage_failed", zap.Error(err))
 		}
 	})
+}
+
+func openAIManagedMediaUsageResult(result *service.OpenAIForwardResult, billingModelSource string) *service.OpenAIForwardResult {
+	if result != nil && billingModelSource == service.BillingModelSourceUpstream {
+		if upstreamModel := strings.TrimSpace(result.UpstreamModel); upstreamModel != "" {
+			cloned := *result
+			cloned.BillingModel = upstreamModel
+			return &cloned
+		}
+	}
+	return result
 }

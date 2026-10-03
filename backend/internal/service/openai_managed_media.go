@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -78,23 +79,191 @@ func ParseOpenAIManagedMediaRequest(endpoint OpenAIManagedMediaEndpoint, body []
 	if len(body) == 0 || !gjson.ValidBytes(body) {
 		return OpenAIManagedMediaRequest{}, errors.New("request body must be valid JSON")
 	}
-	model := strings.TrimSpace(gjson.GetBytes(body, "model").String())
+	if err := validateOpenAIManagedMediaJSON(body); err != nil {
+		return OpenAIManagedMediaRequest{}, err
+	}
+	modelValue := gjson.GetBytes(body, "model")
+	if !modelValue.Exists() || modelValue.Type != gjson.String {
+		return OpenAIManagedMediaRequest{}, errors.New("model must be a string")
+	}
+	model := strings.TrimSpace(modelValue.String())
 	if model == "" {
 		return OpenAIManagedMediaRequest{}, errors.New("model is required")
 	}
-	if endpoint == OpenAIManagedMediaAudioSpeech && strings.TrimSpace(gjson.GetBytes(body, "input").String()) == "" {
-		return OpenAIManagedMediaRequest{}, errors.New("input is required")
+	if endpoint == OpenAIManagedMediaAudioSpeech {
+		inputValue := gjson.GetBytes(body, "input")
+		if !inputValue.Exists() || inputValue.Type != gjson.String || strings.TrimSpace(inputValue.String()) == "" {
+			return OpenAIManagedMediaRequest{}, errors.New("input must be a non-empty string")
+		}
 	}
-	duration := int(gjson.GetBytes(body, "duration").Int())
-	if raw := strings.TrimSpace(gjson.GetBytes(body, "duration").String()); duration == 0 && raw != "" {
-		duration, _ = strconv.Atoi(raw)
+	resolution := VideoBillingResolution480P
+	if endpoint == OpenAIManagedMediaSeedanceCreate {
+		resolutionValue := gjson.GetBytes(body, "resolution")
+		if resolutionValue.Exists() && resolutionValue.Type != gjson.Null && resolutionValue.Type != gjson.String {
+			return OpenAIManagedMediaRequest{}, errors.New("resolution must be a string")
+		}
+		if rawResolution := strings.TrimSpace(resolutionValue.String()); rawResolution != "" {
+			var ok bool
+			resolution, ok = LookupVideoBillingResolution(rawResolution)
+			if !ok {
+				return OpenAIManagedMediaRequest{}, fmt.Errorf("resolution must be one of 480p, 720p, or 1080p")
+			}
+		}
+	}
+	duration := 0
+	durationAuto := true
+	if endpoint == OpenAIManagedMediaSeedanceCreate {
+		durationValue := gjson.GetBytes(body, "duration")
+		if durationValue.Exists() && durationValue.Type != gjson.Null {
+			durationAuto = false
+			switch durationValue.Type {
+			case gjson.Number:
+				rawDuration := durationValue.Float()
+				if math.Trunc(rawDuration) != rawDuration {
+					return OpenAIManagedMediaRequest{}, errors.New("duration must be an integer number of seconds")
+				}
+				duration = int(rawDuration)
+			case gjson.String:
+				var parseErr error
+				duration, parseErr = strconv.Atoi(strings.TrimSpace(durationValue.String()))
+				if parseErr != nil {
+					return OpenAIManagedMediaRequest{}, errors.New("duration must be an integer number of seconds")
+				}
+			default:
+				return OpenAIManagedMediaRequest{}, errors.New("duration must be an integer number of seconds")
+			}
+			if duration < VideoBillingMinDurationSeconds || duration > VideoBillingMaxDurationSeconds {
+				return OpenAIManagedMediaRequest{}, fmt.Errorf(
+					"duration must be between %d and %d seconds",
+					VideoBillingMinDurationSeconds,
+					VideoBillingMaxDurationSeconds,
+				)
+			}
+		}
+	}
+	if durationAuto {
+		duration = VideoBillingDefaultDurationSeconds
 	}
 	return OpenAIManagedMediaRequest{
 		Model:           model,
-		Resolution:      NormalizeVideoBillingResolutionOrDefault(gjson.GetBytes(body, "resolution").String()),
-		DurationSeconds: NormalizeVideoBillingDurationSecondsOrDefault(duration),
-		DurationAuto:    duration <= 0,
+		Resolution:      resolution,
+		DurationSeconds: duration,
+		DurationAuto:    durationAuto,
 	}, nil
+}
+
+func validateOpenAIManagedMediaJSON(body []byte) error {
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.UseNumber()
+	if err := validateOpenAIManagedMediaJSONValue(decoder, openAIManagedMediaJSONScopeTopLevel); err != nil {
+		return err
+	}
+	if _, err := decoder.Token(); !errors.Is(err, io.EOF) {
+		if err == nil {
+			return errors.New("request body must contain exactly one JSON value")
+		}
+		return fmt.Errorf("invalid request JSON: %w", err)
+	}
+	return nil
+}
+
+type openAIManagedMediaJSONScope uint8
+
+const (
+	openAIManagedMediaJSONScopeOther openAIManagedMediaJSONScope = iota
+	openAIManagedMediaJSONScopeTopLevel
+	openAIManagedMediaJSONScopeContent
+	openAIManagedMediaJSONScopeContentItem
+	openAIManagedMediaJSONScopeImageURL
+)
+
+func isOpenAIManagedMediaCanonicalJSONField(scope openAIManagedMediaJSONScope, foldedKey string) bool {
+	switch scope {
+	case openAIManagedMediaJSONScopeTopLevel:
+		switch foldedKey {
+		case "model", "input", "resolution", "duration", "content":
+			return true
+		}
+	case openAIManagedMediaJSONScopeContentItem:
+		switch foldedKey {
+		case "type", "text", "image_url":
+			return true
+		}
+	case openAIManagedMediaJSONScopeImageURL:
+		return foldedKey == "url"
+	}
+	return false
+}
+
+func openAIManagedMediaJSONFieldScope(scope openAIManagedMediaJSONScope, foldedKey string) openAIManagedMediaJSONScope {
+	switch scope {
+	case openAIManagedMediaJSONScopeTopLevel:
+		if foldedKey == "content" {
+			return openAIManagedMediaJSONScopeContent
+		}
+	case openAIManagedMediaJSONScopeContentItem:
+		if foldedKey == "image_url" {
+			return openAIManagedMediaJSONScopeImageURL
+		}
+	}
+	return openAIManagedMediaJSONScopeOther
+}
+
+func validateOpenAIManagedMediaJSONValue(decoder *json.Decoder, scope openAIManagedMediaJSONScope) error {
+	token, err := decoder.Token()
+	if err != nil {
+		return fmt.Errorf("invalid request JSON: %w", err)
+	}
+	delim, ok := token.(json.Delim)
+	if !ok {
+		return nil
+	}
+	switch delim {
+	case '{':
+		seen := make(map[string]struct{})
+		for decoder.More() {
+			keyToken, keyErr := decoder.Token()
+			if keyErr != nil {
+				return fmt.Errorf("invalid request JSON object: %w", keyErr)
+			}
+			key, ok := keyToken.(string)
+			if !ok {
+				return errors.New("invalid request JSON object key")
+			}
+			foldedKey := strings.ToLower(key)
+			if _, duplicate := seen[foldedKey]; duplicate {
+				return fmt.Errorf("duplicate JSON field %q is not allowed", key)
+			}
+			seen[foldedKey] = struct{}{}
+			if isOpenAIManagedMediaCanonicalJSONField(scope, foldedKey) && key != foldedKey {
+				return fmt.Errorf("JSON field %q must use canonical lowercase spelling", key)
+			}
+			if err := validateOpenAIManagedMediaJSONValue(decoder, openAIManagedMediaJSONFieldScope(scope, foldedKey)); err != nil {
+				return err
+			}
+		}
+		end, endErr := decoder.Token()
+		if endErr != nil || end != json.Delim('}') {
+			return errors.New("invalid request JSON object")
+		}
+	case '[':
+		itemScope := openAIManagedMediaJSONScopeOther
+		if scope == openAIManagedMediaJSONScopeContent {
+			itemScope = openAIManagedMediaJSONScopeContentItem
+		}
+		for decoder.More() {
+			if err := validateOpenAIManagedMediaJSONValue(decoder, itemScope); err != nil {
+				return err
+			}
+		}
+		end, endErr := decoder.Token()
+		if endErr != nil || end != json.Delim(']') {
+			return errors.New("invalid request JSON array")
+		}
+	default:
+		return errors.New("invalid request JSON delimiter")
+	}
+	return nil
 }
 
 func OpenAIManagedMediaModerationBody(endpoint OpenAIManagedMediaEndpoint, body []byte) []byte {
@@ -141,6 +310,25 @@ func OpenAIManagedMediaModerationBody(endpoint OpenAIManagedMediaEndpoint, body 
 		return nil
 	}
 	return moderationBody
+}
+
+func hasOpenAIManagedMediaPerRequestPrice(pricing *ChannelModelPricing, tierLabel string) bool {
+	if pricing == nil || (pricing.BillingMode != BillingModePerRequest && pricing.BillingMode != BillingModeImage) {
+		return false
+	}
+	if pricing.PerRequestPrice != nil {
+		return true
+	}
+	tierLabel = strings.TrimSpace(tierLabel)
+	if tierLabel == "" {
+		return false
+	}
+	for _, interval := range pricing.Intervals {
+		if interval.PerRequestPrice != nil && strings.EqualFold(strings.TrimSpace(interval.TierLabel), tierLabel) {
+			return true
+		}
+	}
+	return false
 }
 
 const openAIManagedMediaTaskOwnershipTTL = 24 * time.Hour
@@ -215,19 +403,12 @@ func (s *OpenAIGatewayService) ValidateOpenAIManagedMediaPricing(ctx context.Con
 	models := usageBillingModelCandidates(mappedModel, requestedModel)
 	for _, model := range models {
 		pricing := s.channelService.GetChannelModelPricing(ctx, *apiKey.GroupID, model)
-		if pricing == nil || (pricing.BillingMode != BillingModePerRequest && pricing.BillingMode != BillingModeImage) {
-			continue
+		tierLabel := ""
+		if endpoint == OpenAIManagedMediaSeedanceCreate {
+			tierLabel = NormalizeVideoBillingResolutionOrDefault(resolution)
 		}
-		if pricing.PerRequestPrice != nil {
+		if hasOpenAIManagedMediaPerRequestPrice(pricing, tierLabel) {
 			return nil
-		}
-		if endpoint == OpenAIManagedMediaAudioSpeech {
-			continue
-		}
-		for _, interval := range pricing.Intervals {
-			if interval.PerRequestPrice != nil && strings.EqualFold(strings.TrimSpace(interval.TierLabel), NormalizeVideoBillingResolutionOrDefault(resolution)) {
-				return nil
-			}
 		}
 	}
 	if endpoint == OpenAIManagedMediaSeedanceCreate && !durationAuto && apiKeyHasConfiguredVideoPrice(apiKey, requestedModel, resolution) {
@@ -269,14 +450,36 @@ func (s *OpenAIGatewayService) ForwardOpenAIManagedMedia(
 	targetURL := buildOpenAIEndpointURL(baseURL, path)
 
 	upstreamBody := body
-	upstreamModel := strings.TrimSpace(mappedModel)
-	if upstreamModel == "" {
-		upstreamModel = request.Model
+	routedModel := strings.TrimSpace(mappedModel)
+	if routedModel == "" {
+		routedModel = request.Model
 	}
-	if endpoint.RequiresBody() && upstreamModel != "" && upstreamModel != request.Model {
+	upstreamModel := strings.TrimSpace(account.GetMappedModel(routedModel))
+	if upstreamModel == "" {
+		upstreamModel = routedModel
+	}
+	SetOpsUpstreamModel(c, upstreamModel)
+	if endpoint.RequiresBody() && upstreamModel != "" {
 		upstreamBody, err = sjson.SetBytes(body, "model", upstreamModel)
 		if err != nil {
 			return nil, fmt.Errorf("rewrite managed media model: %w", err)
+		}
+	}
+	if endpoint == OpenAIManagedMediaSeedanceCreate {
+		// Forward the exact normalized dimensions used by admission, reservation,
+		// and settlement. This prevents a larger upstream request from being billed
+		// at a clamped/default duration or resolution.
+		upstreamBody, err = sjson.SetBytes(upstreamBody, "resolution", request.Resolution)
+		if err != nil {
+			return nil, fmt.Errorf("rewrite managed media resolution: %w", err)
+		}
+		if request.DurationAuto {
+			upstreamBody, err = sjson.DeleteBytes(upstreamBody, "duration")
+		} else {
+			upstreamBody, err = sjson.SetBytes(upstreamBody, "duration", request.DurationSeconds)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("rewrite managed media duration: %w", err)
 		}
 	}
 
@@ -341,7 +544,7 @@ func (s *OpenAIGatewayService) ForwardOpenAIManagedMedia(
 		RequestID:       requestID,
 		Usage:           extractOpenAIManagedMediaUsage(responseBody),
 		Model:           request.Model,
-		BillingModel:    request.Model,
+		BillingModel:    routedModel,
 		UpstreamModel:   upstreamModel,
 		ResponseHeaders: resp.Header.Clone(),
 		Duration:        time.Since(startedAt),
@@ -355,6 +558,12 @@ func (s *OpenAIGatewayService) ForwardOpenAIManagedMedia(
 		result.VideoCount = 1
 		result.VideoResolution = request.Resolution
 		result.VideoDurationSeconds = request.DurationSeconds
+		if request.DurationAuto {
+			// Auto duration is valid only with an explicit per-request price.
+			// RequestCount selects that billing path and prevents the normalized
+			// fallback duration from being charged as if the user requested it.
+			result.RequestCount = 1
+		}
 	}
 	return result, nil
 }

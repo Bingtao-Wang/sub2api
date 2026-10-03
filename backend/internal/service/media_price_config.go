@@ -1,5 +1,7 @@
 package service
 
+import "strings"
+
 func imagePriceConfigFromAPIKey(apiKey *APIKey) *ImagePriceConfig {
 	if apiKey == nil || apiKey.Group == nil {
 		return nil
@@ -54,5 +56,22 @@ func groupAudioPriceConfigFromAPIKey(apiKey *APIKey) *audioPriceConfig {
 		RealtimePerMin: g.AudioRealtimePricePerMin,
 		TTSPerMChars:   g.AudioTTSPricePerMillionChars,
 		STTPerHour:     g.AudioSTTPricePerHour,
+	}
+}
+
+func apiKeyHasConfiguredAudioPrice(apiKey *APIKey, mode string) bool {
+	cfg := groupAudioPriceConfigFromAPIKey(apiKey)
+	if cfg == nil {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "realtime":
+		return cfg.RealtimePerMin != nil
+	case "tts":
+		return cfg.TTSPerMChars != nil
+	case "stt":
+		return cfg.STTPerHour != nil
+	default:
+		return false
 	}
 }

@@ -67,6 +67,7 @@ var openaiAllowedHeaders = map[string]bool{
 	"accept-language":         true,
 	"content-type":            true,
 	"conversation_id":         true,
+	"openai-beta":             true,
 	"user-agent":              true,
 	"originator":              true,
 	"session_id":              true,
@@ -280,7 +281,7 @@ type OpenAIForwardResult struct {
 	// WebSearchCalls 是 Codex alpha/search 网页搜索调用次数（每次成功请求为 1）。
 	// 上游不返回 usage 字段，>0 时走按次计费（分组单价 × 次数 × 倍率）。
 	WebSearchCalls int
-	// RequestCount 用于 Audio Speech 等无 token usage 的按次计费端点。
+	// RequestCount 用于 Audio Speech、自动时长视频等无 token usage 的按次计费端点。
 	RequestCount int
 	// MediaType 标识非图片媒体（audio/video），用于用量记录和幂等计费指纹。
 	MediaType   string

@@ -399,6 +399,33 @@ func TestCalculateCostUnified_UsesPreResolvedPricing(t *testing.T) {
 	require.Equal(t, string(BillingModePerRequest), cost.BillingMode)
 }
 
+func TestCalculateCostUnified_ExplicitZeroTierDoesNotFallBackToDefault(t *testing.T) {
+	bs := newTestBillingService()
+	resolver := NewModelPricingResolver(nil, bs)
+	free := 0.0
+	preResolved := &ResolvedPricing{
+		Mode:                   BillingModePerRequest,
+		DefaultPerRequestPrice: 0.07,
+		RequestTiers: []PricingInterval{{
+			TierLabel: " 1080P ", PerRequestPrice: &free,
+		}},
+	}
+
+	cost, err := bs.CalculateCostUnified(CostInput{
+		Ctx:            context.Background(),
+		Model:          "managed-video",
+		RequestCount:   1,
+		SizeTier:       "1080p",
+		RateMultiplier: 2,
+		Resolver:       resolver,
+		Resolved:       preResolved,
+	})
+	require.NoError(t, err)
+	require.Zero(t, cost.TotalCost)
+	require.Zero(t, cost.ActualCost)
+	require.Equal(t, string(BillingModePerRequest), cost.BillingMode)
+}
+
 // ---------------------------------------------------------------------------
 // helpers
 // ---------------------------------------------------------------------------
