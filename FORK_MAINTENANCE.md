@@ -393,7 +393,7 @@ sg docker -c "docker run --rm \
   -v '$PWD/backend:/app' -w /app \
   -e GOPROXY='https://goproxy.cn,direct' \
   -e GOSUMDB='sum.golang.google.cn' \
-  golang:1.27.0 go test ./... -count=1"
+  golang:1.27.2 go test ./... -count=1"
 ```
 
 关键定制快速测试：

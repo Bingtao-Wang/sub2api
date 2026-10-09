@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MODE="${1:-all}"
-GO_IMAGE="${GO_IMAGE:-golang:1.27.0-alpine}"
+GO_IMAGE="${GO_IMAGE:-golang:1.27.2-alpine}"
 NODE_IMAGE="${NODE_IMAGE:-node:24-alpine}"
 BACKEND_TEST_CMD="${BACKEND_TEST_CMD:-/usr/local/go/bin/go test ./internal/service -run OpenAIImages\\|ImageGeneration\\|Gallery -count=1}"
 FRONTEND_TEST_CMD="${FRONTEND_TEST_CMD:-pnpm vitest run src/utils/__tests__/embedded-url.spec.ts src/utils/__tests__/clientConfig.spec.ts src/components/keys/__tests__/UseKeyModal.spec.ts}"
