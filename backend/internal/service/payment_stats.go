@@ -12,17 +12,21 @@ import (
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/ent/paymentauditlog"
 	"github.com/Wei-Shaw/sub2api/ent/paymentorder"
+	"github.com/Wei-Shaw/sub2api/internal/payment"
+	appTimezone "github.com/Wei-Shaw/sub2api/internal/pkg/timezone"
 )
 
 // --- Dashboard & Analytics ---
+
+const monthlyRevenueMonths = 12
 
 func (s *PaymentService) GetDashboardStats(ctx context.Context, days int) (*DashboardStats, error) {
 	if days <= 0 {
 		days = 30
 	}
-	now := time.Now()
+	now := appTimezone.Now()
 	since := now.AddDate(0, 0, -days)
-	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	todayStart := appTimezone.StartOfDay(now)
 
 	paidStatuses := []string{OrderStatusCompleted, OrderStatusPaid, OrderStatusRecharging}
 
@@ -49,6 +53,28 @@ func (s *PaymentService) GetDashboardStats(ctx context.Context, days int) (*Dash
 	st.DailySeries = buildDailySeries(orders, since, days)
 	st.PaymentMethods = buildMethodDistribution(orders)
 	st.TopUsers = buildTopUsers(orders)
+
+	// Monthly revenue is a fixed calendar-month view and intentionally does
+	// not follow the dashboard's rolling 7/30/90-day selector. PaidAt is the
+	// source of truth for gross receipts so a later refund or fulfillment
+	// status transition does not erase the original payment from history.
+	monthlyStart := appTimezone.StartOfMonth(now).AddDate(0, -(monthlyRevenueMonths - 1), 0)
+	monthlyOrders, err := s.entClient.PaymentOrder.Query().
+		Where(
+			paymentorder.PaidAtNotNil(),
+			paymentorder.PaidAtGTE(monthlyStart),
+			paymentorder.PaidAtLTE(now),
+		).
+		Select(
+			paymentorder.FieldPayAmount,
+			paymentorder.FieldPaidAt,
+			paymentorder.FieldProviderSnapshot,
+		).
+		All(ctx)
+	if err != nil {
+		return nil, err
+	}
+	st.MonthlySeries = buildMonthlySeries(monthlyOrders, monthlyStart, monthlyRevenueMonths, appTimezone.Location())
 
 	return st, nil
 }
@@ -101,6 +127,51 @@ func buildDailySeries(orders []*dbent.PaymentOrder, since time.Time, days int) [
 		} else {
 			series = append(series, DailyStats{Date: date, Amount: make(CurrencyAmounts)})
 		}
+	}
+	return series
+}
+
+func buildMonthlySeries(orders []*dbent.PaymentOrder, start time.Time, months int, loc *time.Location) []MonthlyStats {
+	if months <= 0 {
+		return []MonthlyStats{}
+	}
+	if loc == nil {
+		loc = time.Local
+	}
+
+	start = start.In(loc)
+	start = time.Date(start.Year(), start.Month(), 1, 0, 0, 0, 0, loc)
+	end := start.AddDate(0, months, 0)
+	monthlyMap := make(map[string]*MonthlyStats, months)
+
+	for _, o := range orders {
+		if o == nil || o.PaidAt == nil {
+			continue
+		}
+		paidAt := o.PaidAt.In(loc)
+		if paidAt.Before(start) || !paidAt.Before(end) {
+			continue
+		}
+
+		month := paidAt.Format("2006-01")
+		ms, ok := monthlyMap[month]
+		if !ok {
+			ms = &MonthlyStats{Month: month, Amount: make(CurrencyAmounts)}
+			monthlyMap[month] = ms
+		}
+		ms.Amount[PaymentOrderCurrency(o)] += o.PayAmount
+		ms.Count++
+	}
+
+	series := make([]MonthlyStats, 0, months)
+	for i := 0; i < months; i++ {
+		month := start.AddDate(0, i, 0).Format("2006-01")
+		if ms, ok := monthlyMap[month]; ok {
+			roundCurrencyAmountsByCurrency(ms.Amount)
+			series = append(series, *ms)
+			continue
+		}
+		series = append(series, MonthlyStats{Month: month, Amount: make(CurrencyAmounts)})
 	}
 	return series
 }
@@ -168,6 +239,13 @@ func buildTopUsers(orders []*dbent.PaymentOrder) TopUsersByCurrency {
 func roundCurrencyAmounts(amounts CurrencyAmounts) {
 	for currency, amount := range amounts {
 		amounts[currency] = roundAmount(amount)
+	}
+}
+
+func roundCurrencyAmountsByCurrency(amounts CurrencyAmounts) {
+	for currency, amount := range amounts {
+		factor := math.Pow10(payment.CurrencyMaxFractionDigits(currency))
+		amounts[currency] = math.Round(amount*factor) / factor
 	}
 }
 

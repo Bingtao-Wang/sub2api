@@ -245,6 +245,14 @@ export interface DailyPaymentStats {
   count: number
 }
 
+export interface MonthlyPaymentStats {
+  /** Calendar month in the server business timezone, formatted as YYYY-MM. */
+  month: string
+  /** Gross receipts before refunds, grouped by ISO 4217 currency. */
+  amount: CurrencyAmounts
+  count: number
+}
+
 export interface PaymentMethodStats {
   type: string
   amount: CurrencyAmounts
@@ -263,7 +271,10 @@ export interface DashboardStats {
   today_count: number
   total_count: number
   avg_amount: CurrencyAmounts
+  pending_orders: number
   daily_series: DailyPaymentStats[]
+  /** Fixed recent calendar months; independent of the 7/30/90-day selector. */
+  monthly_series?: MonthlyPaymentStats[]
   payment_methods: PaymentMethodStats[]
   top_users: Record<string, TopUserPaymentStats[]>
 }

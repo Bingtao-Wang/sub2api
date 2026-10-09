@@ -153,6 +153,7 @@ type DashboardStats struct {
 	PendingOrders int             `json:"pending_orders"`
 
 	DailySeries    []DailyStats        `json:"daily_series"`
+	MonthlySeries  []MonthlyStats      `json:"monthly_series"`
 	PaymentMethods []PaymentMethodStat `json:"payment_methods"`
 	TopUsers       TopUsersByCurrency  `json:"top_users"`
 }
@@ -163,6 +164,15 @@ type CurrencyAmounts map[string]float64
 
 type DailyStats struct {
 	Date   string          `json:"date"`
+	Amount CurrencyAmounts `json:"amount"`
+	Count  int             `json:"count"`
+}
+
+// MonthlyStats contains gross payment receipts for one calendar month.
+// Amounts are grouped by currency because values in different currencies
+// must never be added together.
+type MonthlyStats struct {
+	Month  string          `json:"month"`
 	Amount CurrencyAmounts `json:"amount"`
 	Count  int             `json:"count"`
 }
