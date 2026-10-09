@@ -423,7 +423,56 @@ export default {
 
     gallery: {
       title: '图片画廊',
-      description: '管理用户发布到公开画廊的图片'
+      description: '管理用户发布到公开画廊的图片',
+      summary: {
+        total: '共 {count} 张',
+        pageSize: '每页 {count} 张'
+      },
+      actions: {
+        refresh: '刷新',
+        cleanup: '手动清理',
+        hide: '隐藏',
+        show: '显示',
+        unsetPermanent: '取消常驻',
+        setPermanent: '设为常驻',
+        unsetFeatured: '取消推荐',
+        setFeatured: '设为推荐',
+        delete: '删除'
+      },
+      imageAlt: '画廊图片',
+      badges: {
+        permanent: '常驻',
+        featured: '推荐'
+      },
+      userFallback: '用户 #{id}',
+      columns: {
+        image: '图片',
+        prompt: '提示词',
+        status: '状态',
+        user: '发布用户',
+        size: '大小',
+        publishedAt: '发布时间',
+        actions: '操作'
+      },
+      status: {
+        visible: '可见',
+        hidden: '隐藏',
+        deleted: '已删除'
+      },
+      empty: '暂无画廊图片',
+      pagination: {
+        previous: '上一页',
+        indicator: '第 {page} / {pages} 页',
+        next: '下一页'
+      },
+      messages: {
+        loadFailed: '画廊加载失败',
+        updated: '画廊项目已更新',
+        updateFailed: '更新失败',
+        confirmDelete: '确定删除画廊图片 #{id}？文件会同时删除。',
+        cleanupComplete: '清理完成：{count} 条记录，释放 {size}',
+        cleanupFailed: '清理失败'
+      }
     },
 
     affiliates: {

@@ -12,6 +12,7 @@ const customFeatureSources = [
   'src/components/payment/providerConfig.ts',
   'src/router/index.ts',
   'src/views/admin/affiliates/AdminAffiliateHierarchyView.vue',
+  'src/views/admin/GalleryView.vue',
   'src/views/user/AffiliateHierarchyView.vue',
   'src/views/user/UsageTutorialView.vue',
 ]
@@ -68,5 +69,12 @@ describe.each([
       .map(key => `dynamic custom key: ${key}`))
 
     expect(missing).toEqual([])
+  })
+})
+
+describe('custom feature copy uses locale keys', () => {
+  it('does not hard-code Chinese copy in GalleryView', () => {
+    const source = readFileSync(resolve(process.cwd(), 'src/views/admin/GalleryView.vue'), 'utf8')
+    expect(source).not.toMatch(/\p{Script=Han}/u)
   })
 })

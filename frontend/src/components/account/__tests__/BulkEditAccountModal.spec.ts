@@ -569,6 +569,26 @@ describe('BulkEditAccountModal', () => {
     })
   })
 
+  it('shows and persists Audio Speech in a two-capability bulk update', async () => {
+    const wrapper = mountModal({ selectedPlatforms: ['openai'], selectedTypes: ['apikey'] })
+    const audioSpeech = wrapper.get(
+      '[data-testid="bulk-edit-openai-endpoint-capability-audio_speech"]'
+    )
+
+    expect(audioSpeech.exists()).toBe(true)
+    expect(translate).toHaveBeenCalledWith('admin.accounts.openai.capabilityAudioSpeech')
+
+    await wrapper.get('#bulk-edit-openai-endpoint-capabilities-enabled').setValue(true)
+    await wrapper.get('[data-testid="bulk-edit-openai-endpoint-capability-embeddings"]').setValue(false)
+    await audioSpeech.setValue(true)
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith([1, 2], {
+      credentials: { openai_capabilities: ['chat_completions', 'audio_speech'] }
+    })
+  })
+
   it('关闭端点能力修改后 Responses 路由恢复独立可编辑', async () => {
     const wrapper = mountModal({
       selectedPlatforms: ['openai'],

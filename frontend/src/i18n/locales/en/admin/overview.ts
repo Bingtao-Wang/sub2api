@@ -423,7 +423,56 @@ export default {
 
     gallery: {
       title: 'Image Gallery',
-      description: 'Manage images published by users to the public gallery'
+      description: 'Manage images published by users to the public gallery',
+      summary: {
+        total: '{count} images total',
+        pageSize: '{count} per page'
+      },
+      actions: {
+        refresh: 'Refresh',
+        cleanup: 'Clean Up Now',
+        hide: 'Hide',
+        show: 'Show',
+        unsetPermanent: 'Remove Permanent Status',
+        setPermanent: 'Make Permanent',
+        unsetFeatured: 'Remove from Featured',
+        setFeatured: 'Feature',
+        delete: 'Delete'
+      },
+      imageAlt: 'Gallery image',
+      badges: {
+        permanent: 'Permanent',
+        featured: 'Featured'
+      },
+      userFallback: 'User #{id}',
+      columns: {
+        image: 'Image',
+        prompt: 'Prompt',
+        status: 'Status',
+        user: 'Published By',
+        size: 'Size',
+        publishedAt: 'Published At',
+        actions: 'Actions'
+      },
+      status: {
+        visible: 'Visible',
+        hidden: 'Hidden',
+        deleted: 'Deleted'
+      },
+      empty: 'No gallery images',
+      pagination: {
+        previous: 'Previous',
+        indicator: 'Page {page} of {pages}',
+        next: 'Next'
+      },
+      messages: {
+        loadFailed: 'Failed to load gallery',
+        updated: 'Gallery item updated',
+        updateFailed: 'Update failed',
+        confirmDelete: 'Delete gallery image #{id}? Its files will also be deleted.',
+        cleanupComplete: 'Cleanup complete: {count} records deleted, {size} freed',
+        cleanupFailed: 'Cleanup failed'
+      }
     },
 
     affiliates: {
