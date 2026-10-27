@@ -8,15 +8,17 @@
 | --- | --- |
 | 仓库 | `/home/aihub/Peter_ws/sub2api` |
 | 生产分支 | `custom/gallery` |
-| 上游 | `upstream/main` = `3a6fd1c9db07` (`v0.2.15-1-g3a6fd1c9d`, VERSION `0.2.15`) |
-| 定制源码提交 | `155a8fe0a010` |
+| 上游 | `upstream/main` = `f178e5ae3265` (`v0.2.18`, VERSION `0.2.18`) |
+| 当前生产源码提交 | `155a8fe0a010`（已验收的 v0.2.15 发布源码） |
 | 当前仓库 HEAD | 以 `git rev-parse --short=12 HEAD` 为准 |
+| 当前同步状态 | v0.2.18 本地门禁已通过；推送后 Actions 与生产发布待完成 |
 | 生产镜像 | `sub2api-custom:20261009-upstream-v0215-155a8fe0` |
 | Compose 项目 | `peter-sub2api` |
 | 本机入口 | `http://127.0.0.1:18080` |
 | 公网入口 | `https://api.peterai.cc.cd` |
 | 数据 volume | `peter-sub2api_sub2api_data` |
 | 最近发布备份 | `/home/aihub/Peter_ws/sub2api-backups/20261009_190556` |
+| 最近本地备份 | `/home/aihub/Peter_ws/sub2api-backups/20261027_020001` |
 
 快速确认：
 
@@ -81,6 +83,30 @@ git status --short --branch
 git log --oneline --left-right origin/custom/gallery...custom/gallery | head -120
 git push origin custom/gallery
 ```
+
+### 2.3 当前 v0.2.18 同步门槛
+
+2026-10-27 开始合入本地 `upstream/main` 的完整提交 `f178e5ae32659e8901644a9f2378a0439ffa36ae`（VERSION `0.2.18`），合并前备份分支为 `custom/gallery-backup-20261027-before-v0.2.18`。2026-10-28 已解决以下 4 个冲突文件：
+
+- `backend/cmd/server/wire_gen.go`：从 `wire.go` 重新生成，保留 Gallery 和 Gemini cached-content 服务的依赖与清理逻辑。
+- `backend/internal/payment/provider/easypay.go`：保留 `queryUrl`、findorder type=2/type=1 和 api.php 回退链；兼容字符串/数字响应与 GET/POST 参数；回调确认只查询商户自身 api.php，保留订单号校验及传输错误密钥脱敏。
+- `backend/internal/server/routes/prompt_audit_route_coverage_test.go`：同时覆盖托管 Audio/Seedance 和上游新增的 `/cachedContents`。
+- `backend/internal/service/openai_gateway_service.go`：保留 input-tokens 端点及 Codex UA/version 同源约束。
+
+本轮还为易支付的 type=1 回退和回调确认边界补充回归测试；将调度与 Responses failover 测试使用的旧模型更新为 `gpt-5.6-sol`，保留原有断言，并对齐空映射 OAuth 模型能力测试及 fork 的 GPT-5.5 默认测试模型断言。
+
+已通过：支付 provider 全量测试与 `-race` 检查、后端 unit、无标签及真实容器 integration 全量测试、Codex 身份与托管媒体相关测试、Wire 重复生成一致性检查、生产启动包编译；前端 lint/typecheck、381 文件/3036 项测试及生产构建；golangci-lint v2.14.0 为 0 issues、govulncheck 无可达漏洞、pnpm audit 例外规则检查；Compose 安全/环境/资源、Caddy、Python 3.12 发布辅助 10 项测试和 `git diff --check`。GitHub Actions 和生产验收仍需完成。
+
+构建环境说明：Docker Hub DNS 在本机不可用，本轮用缓存的 `golang:1.27.2-alpine` 基础镜像替换为官方 Go 1.27.3 工具链，创建 `sub2api-build-go:1.27.3-alpine-local`；工具链归档 SHA-256 `65efbc80fdc1fa2cd2631cad5b481777a68e8725f34e89f50fc6ac714e379b40` 已与 go.dev 下载元数据核对。生产构建使用 `--build-arg GOLANG_IMAGE=sub2api-build-go:1.27.3-alpine-local`，源码 Dockerfile 的默认版本保持 `golang:1.27.3-alpine`。
+
+后续按以下顺序完成同步和发布：
+
+1. 运行完整源码门禁，完成合并提交并推送 `custom/gallery`。
+2. 确认该提交的 `CI` 和 `Security Scan` 均成功。
+3. 按第 5.3 节备份、构建、切换生产镜像并完成生产验收。
+4. 记录实际生产源码 SHA、镜像、发布备份和第 8 节里程碑；验收完成后将 v0.2.18 记为当前生产版本。
+
+工作区 VERSION `0.2.18` 仅表示同步目标；当前生产仍按第 1 节已验收的 v0.2.15 记录。合并提交前继续保留合并前备份分支，生产切换前保留旧镜像及发布备份。
 
 ## 3. 定制功能不变量
 
@@ -394,7 +420,7 @@ sg docker -c "docker run --rm \
   -v '$PWD/backend:/app' -w /app \
   -e GOPROXY='https://goproxy.cn,direct' \
   -e GOSUMDB='sum.golang.google.cn' \
-  golang:1.27.2 go test ./... -count=1"
+  golang:1.27.3 go test ./... -count=1"
 ```
 
 关键定制快速测试：

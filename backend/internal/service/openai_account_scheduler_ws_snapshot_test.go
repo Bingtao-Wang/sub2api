@@ -52,7 +52,7 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_UsesWSPassthroughSnapsh
 		&groupID,
 		"",
 		"session_hash_ws_passthrough",
-		"gpt-5.1",
+		"gpt-5.6-sol",
 		nil,
 		OpenAIUpstreamTransportResponsesWebsocketV2,
 		false,

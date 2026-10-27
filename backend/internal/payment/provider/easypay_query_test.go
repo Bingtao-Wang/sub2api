@@ -20,6 +20,7 @@ func TestEasyPayQueryOrderStatusMapping(t *testing.T) {
 		wantStatus  string
 		wantTradeNo string
 		wantAmount  float64
+		wantErr     bool
 	}{
 		{
 			name:        "top level trade success is paid",
@@ -64,10 +65,64 @@ func TestEasyPayQueryOrderStatusMapping(t *testing.T) {
 			wantAmount:  3.21,
 		},
 		{
-			name:        "query failure with missing status is pending",
-			body:        `{"code":0,"msg":"订单不存在"}`,
+			name:    "query failure code is an error",
+			body:    `{"code":0,"msg":"订单不存在"}`,
+			wantErr: true,
+		},
+		{
+			name:    "explicit failure code wins over paid status fields",
+			body:    `{"code":-1,"msg":"签名错误","status":1,"trade_status":"TRADE_SUCCESS","money":"12.34"}`,
+			wantErr: true,
+		},
+		{
+			name:    "string failure code is an error",
+			body:    `{"code":"-1","msg":"error","status":1}`,
+			wantErr: true,
+		},
+		{
+			name:    "foreign order echo is rejected",
+			body:    `{"code":1,"pid":"pid-1","out_trade_no":"order-999","trade_status":"TRADE_SUCCESS","money":"12.34"}`,
+			wantErr: true,
+		},
+		{
+			name:    "foreign order echo in nested data is rejected",
+			body:    `{"code":1,"data":{"out_trade_no":"order-999","trade_status":"TRADE_SUCCESS","money":"12.34"}}`,
+			wantErr: true,
+		},
+		{
+			name:        "string numeric status from PHP deployments is paid",
+			body:        `{"code":"1","msg":"查询订单号成功！","trade_no":"2026101600001","out_trade_no":"order-123","pid":"1001","money":"12.34","status":"1"}`,
+			wantStatus:  payment.ProviderStatusPaid,
+			wantTradeNo: "2026101600001",
+			wantAmount:  12.34,
+		},
+		{
+			name:        "string numeric unpaid status is pending",
+			body:        `{"code":1,"trade_no":"2026101600001","money":"12.34","status":"0"}`,
 			wantStatus:  payment.ProviderStatusPending,
-			wantTradeNo: orderID,
+			wantTradeNo: "2026101600001",
+			wantAmount:  12.34,
+		},
+		{
+			name:        "documented caihong response with integer pid and status is paid",
+			body:        `{"code":1,"msg":"查询订单号成功！","trade_no":"2016080622555342651","out_trade_no":"order-123","api_trade_no":"4200001","type":"alipay","pid":1001,"addtime":"2016-08-06 22:55:52","endtime":"2016-08-06 22:55:52","name":"VIP会员","money":"1.00","status":1,"param":"","buyer":""}`,
+			wantStatus:  payment.ProviderStatusPaid,
+			wantTradeNo: "2016080622555342651",
+			wantAmount:  1,
+		},
+		{
+			name:        "null top-level fields fall back to nested data",
+			body:        `{"code":1,"status":null,"money":null,"trade_no":null,"data":{"status":1,"money":"5.00","trade_no":"data-789"}}`,
+			wantStatus:  payment.ProviderStatusPaid,
+			wantTradeNo: "data-789",
+			wantAmount:  5,
+		},
+		{
+			name:        "matching identity echo with numeric fields is paid",
+			body:        `{"code":"1","pid":"pid-1","out_trade_no":"order-123","trade_status":"TRADE_SUCCESS","money":12.34,"trade_no":2026101600001}`,
+			wantStatus:  payment.ProviderStatusPaid,
+			wantTradeNo: "2026101600001",
+			wantAmount:  12.34,
 		},
 		{
 			name:        "missing fields are pending",
@@ -93,9 +148,16 @@ func TestEasyPayQueryOrderStatusMapping(t *testing.T) {
 				if err := r.ParseForm(); err != nil {
 					t.Errorf("ParseForm: %v", err)
 				}
-				gotForm = make(url.Values, len(r.PostForm))
+				// Parameters must be in the URL query (彩虹易支付 reads $_GET)
+				// and mirrored in the body for forks that read $_POST.
+				gotForm = r.URL.Query()
 				for key, values := range r.PostForm {
-					gotForm[key] = append([]string(nil), values...)
+					if got := gotForm.Get(key); got != values[0] {
+						t.Errorf("body[%s] = %q, query has %q", key, values[0], got)
+					}
+				}
+				if len(r.PostForm) != len(gotForm) {
+					t.Errorf("body params %v do not mirror query params %v", r.PostForm, gotForm)
 				}
 				w.Header().Set("Content-Type", "application/json")
 				_, _ = w.Write([]byte(tt.body))
@@ -106,6 +168,12 @@ func TestEasyPayQueryOrderStatusMapping(t *testing.T) {
 			provider.config["queryUrl"] = server.URL + "/api.php"
 			provider.config["apiBase"] = ""
 			resp, err := provider.QueryOrder(context.Background(), orderID)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("QueryOrder succeeded, want error (response=%+v)", resp)
+				}
+				return
+			}
 			if err != nil {
 				t.Fatalf("QueryOrder returned error: %v", err)
 			}
@@ -215,5 +283,38 @@ func TestEasyPayQueryOrderFallsBackFromMissingFindOrderToLegacyAPI(t *testing.T)
 	}
 	if resp.TradeNo != "legacy-789" {
 		t.Fatalf("trade_no = %q, want legacy-789", resp.TradeNo)
+	}
+}
+
+func TestEasyPayQueryOrderFallsBackToFindOrderSystemNumber(t *testing.T) {
+	t.Parallel()
+	var lookupTypes []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/findorder" {
+			t.Errorf("unexpected endpoint: %s", r.URL.Path)
+		}
+		if err := r.ParseForm(); err != nil {
+			t.Errorf("ParseForm: %v", err)
+			return
+		}
+		lookupTypes = append(lookupTypes, r.PostForm.Get("type"))
+		if r.PostForm.Get("type") == "2" {
+			_, _ = w.Write([]byte(`{"code":201,"msg":"not found"}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"code":"200","data":{"status":"1","money":8.88,"trade_no":"system-123","out_trade_no":"order-123"}}`))
+	}))
+	defer server.Close()
+	provider := newTestEasyPay(t, server.URL)
+	provider.config["queryUrl"] = server.URL + "/api/findorder"
+	result, err := provider.QueryOrder(context.Background(), "order-123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(lookupTypes) != 2 || lookupTypes[0] != "2" || lookupTypes[1] != "1" {
+		t.Fatalf("lookup types = %v, want [2 1]", lookupTypes)
+	}
+	if result.Status != payment.ProviderStatusPaid || result.TradeNo != "system-123" || result.Amount != 8.88 {
+		t.Fatalf("unexpected result: %+v", result)
 	}
 }
