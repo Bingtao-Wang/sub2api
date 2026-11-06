@@ -252,7 +252,7 @@ func TestEasyPayNotifyAllowsFreeTextNameOnly(t *testing.T) {
 	}
 }
 
-func TestEasyPayConfirmNotificationIgnoresPollingQueryURL(t *testing.T) {
+func TestEasyPayConfirmNotificationIgnoresCrossOriginPollingQueryURL(t *testing.T) {
 	t.Parallel()
 	provider, calls := newConfirmTestEasyPay(t,
 		`{"code":1,"out_trade_no":"sub2_ORDER1","trade_no":"2026101600001","money":"10.00","status":1}`, http.StatusOK)
@@ -280,5 +280,49 @@ func TestEasyPayConfirmNotificationRejectsFindOrderCode(t *testing.T) {
 	}
 	if calls.Load() != 1 {
 		t.Fatalf("query calls = %d, want 1", calls.Load())
+	}
+}
+
+func TestEasyPayConfirmNotificationSameOriginFindOrder(t *testing.T) {
+	t.Parallel()
+	tests := []struct{ name, body, wantErr string }{
+		{"paid", `{"code":200,"data":{"out_trade_no":"sub2_ORDER1","trade_no":"2026101600001","money":"10.00","status":1}}`, ""},
+		{"unpaid", `{"code":200,"data":{"out_trade_no":"sub2_ORDER1","trade_no":"2026101600001","money":"10.00","status":0}}`, "not paid"},
+		{"wrong order", `{"code":200,"data":{"out_trade_no":"sub2_OTHER","trade_no":"2026101600001","money":"10.00","status":1}}`, "out_trade_no mismatch"},
+		{"missing order", `{"code":200,"data":{"trade_no":"2026101600001","money":"10.00","status":1}}`, "matching out_trade_no"},
+		{"missing trade", `{"code":200,"data":{"out_trade_no":"sub2_ORDER1","money":"10.00","status":1}}`, "missing trade_no"},
+		{"wrong amount", `{"code":200,"data":{"out_trade_no":"sub2_ORDER1","trade_no":"2026101600001","money":"1.00","status":1}}`, "amount mismatch"},
+		{"wrong trade", `{"code":200,"data":{"out_trade_no":"sub2_ORDER1","trade_no":"OTHER","money":"10.00","status":1}}`, "trade_no mismatch"},
+		{"failure code", `{"code":500,"data":{"out_trade_no":"sub2_ORDER1","trade_no":"2026101600001","money":"10.00","status":1}}`, "query failed"},
+		{"missing code", `{"data":{"out_trade_no":"sub2_ORDER1","trade_no":"2026101600001","money":"10.00","status":1}}`, "missing success code"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var calls atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls.Add(1)
+				if err := r.ParseForm(); err != nil {
+					t.Error(err)
+				}
+				if r.URL.Path != "/api/findorder" || r.PostForm.Get("order_no") != "sub2_ORDER1" || r.PostForm.Get("type") != "2" {
+					t.Errorf("unexpected confirmation lookup: path=%s form=%v", r.URL.Path, r.PostForm)
+				}
+				_, _ = w.Write([]byte(tt.body))
+			}))
+			defer server.Close()
+			e := newTestEasyPay(t, server.URL)
+			e.config["queryUrl"] = server.URL + "/api/findorder"
+			err := e.ConfirmNotification(context.Background(), confirmTestNotification())
+			if tt.wantErr == "" && err != nil {
+				t.Fatal(err)
+			}
+			if tt.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tt.wantErr)) {
+				t.Fatalf("error=%v, want %q", err, tt.wantErr)
+			}
+			if calls.Load() != 1 {
+				t.Fatalf("calls=%d, want 1", calls.Load())
+			}
+		})
 	}
 }

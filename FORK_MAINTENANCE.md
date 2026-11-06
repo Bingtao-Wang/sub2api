@@ -9,16 +9,16 @@
 | 仓库 | `/home/aihub/Peter_ws/sub2api` |
 | 生产分支 | `custom/gallery` |
 | 上游 | `upstream/main` = `f178e5ae3265` (`v0.2.18`, VERSION `0.2.18`) |
-| 当前生产源码提交 | `560133dffc19`（已验收的 v0.2.18 发布源码） |
+| 当前生产源码提交 | `307a73adc` + 2026-11-03 本地支付兼容补丁（见 2.4） |
 | 当前仓库 HEAD | 以 `git rev-parse --short=12 HEAD` 为准 |
 | 当前同步状态 | v0.2.18 已完成合并、推送、源码 Actions 门禁和生产验收 |
-| 生产镜像 | `sub2api-custom:20261028-upstream-v0218-560133df` |
+| 生产镜像 | `sub2api-custom:20261103-payment-fix` |
 | Compose 项目 | `peter-sub2api` |
 | 本机入口 | `http://127.0.0.1:18080` |
 | 公网入口 | `https://api.peterai.cc.cd` |
 | 数据 volume | `peter-sub2api_sub2api_data` |
-| 最近发布备份 | `/home/aihub/Peter_ws/sub2api-backups/20261028_005122` |
-| 最近本地备份 | `/home/aihub/Peter_ws/sub2api-backups/20261028_005122` |
+| 最近发布备份 | `/home/aihub/Peter_ws/sub2api-backups/20261103_173547` |
+| 最近本地备份 | `/home/aihub/Peter_ws/sub2api-backups/20261103_173547` |
 
 快速确认：
 
@@ -104,13 +104,39 @@ git push origin custom/gallery
 生产验收包括本机/公网 health、API Key 认证模型列表（均为 23 个模型）、Canvas health/menu/iframe、PeterAI 画图 iframe、图片价格及静态文件核对。仓库与 volume 中四个静态文件的 SHA-256 一致；公网 JS/CSS/SVG 直接一致，HTML 去除已识别的 Cloudflare challenge 注入脚本后与源文件一致。公网偶发超时/TLS 错误经重试后通过，不修改 Cloudflare 配置。新容器启动日志未发现 error、fatal、panic 或迁移失败。
 
 旧生产镜像 `sub2api-custom:20261009-upstream-v0215-155a8fe0`、原发布备份和合并前备份分支继续保留，必要时按第 5.4 节回滚。
+### 2.4 2026-11-03 易支付到账修复
+
+生产故障由两项问题叠加：应用代理仍指向 `172.23.0.1:7890`，实际网关/代理监听地址已为 `172.18.0.1:7890`；易支付的 `/api.php?act=order` 返回 404，但配置中的同源 `/api/findorder` 可正常返回已支付订单。成功回调通过验签后，在二次查单时超时并返回 502，未进入入账流程。
+
+本次生产变更：
+
+- `deploy/.env` 修正 HTTP/HTTPS 代理，并在 `NO_PROXY` 中追加 `ezfpy.cn,.ezfpy.cn`，让支付网关直连。
+- 回调确认兼容管理员已配置、与支付 API 同源的 `/api/findorder`，只以商户订单号 `type=2` 查询；要求成功响应、精确订单号和非空交易号，并保留已支付状态、金额、交易号及回调签名/商户校验。
+- 不同源查询地址仍不能用于确认回调，继续使用原商户 `/api.php`；旧版 PHP 网关协议保持兼容。
+- 新镜像基于旧生产镜像替换 Go 后端二进制，使用 Go 1.27.3、现有前端嵌入资源和 `embed` 标签构建；只重建应用容器。
+
+17:40:35–17:40:36（Asia/Shanghai）经网关逐单核对后，在本机重新构造已核实付款的签名通知，经正常 webhook → 验签 → 网关确认 → 幂等兑换码履约恢复以下订单；没有直接更新用户余额。
+
+| 订单 | 用户 ID | 入账额度 | 最终状态 |
+| --- | --- | --- | --- |
+| 359 | 161 | 10 | COMPLETED |
+| 360 | 272 | 20 | COMPLETED（由 CANCELLED 恢复） |
+| 361 | 506 | 100 | COMPLETED |
+| 362 | 28 | 1 | COMPLETED |
+
+合计恢复 131 额度。17:41 再次提交相同订单的签名通知，4 笔均返回 200/success；每笔订单仍只有一条 `ORDER_PAID` 和一条 `RECHARGE_SUCCESS`，兑换码均由订单所属用户使用且面值一致。订单 360 的邀请返利也由正常履约逻辑处理。
+
+已通过支付 provider 全量测试、相关 service unit 测试（含重复通知/入账幂等）、相关 handler unit 测试、生产启动构建、Compose 配置校验、本机/公网 health 和真实已支付订单恢复检查。9 组新增回归覆盖同源 findorder 成功、未付、错误/缺失订单号、缺失/冲突交易号、金额不符、错误/缺失成功码。`deploy/verify-production.sh` 完整通过（含公网静态资源、图片价格与 volume 文件校验）；17:43 后台过期清理恢复运行，处理 5 笔历史未完成订单。
+
+变更前备份 `/home/aihub/Peter_ws/sub2api-backups/20261103_173547` 含 PostgreSQL dump、应用数据、校验文件及权限为 600 的 `deploy.env.before-payment-fix`。旧镜像 `sub2api-custom:20261028-upstream-v0218-560133df` 保留。业务已成功入账，不应通过恢复旧数据库回滚应用变更。
+
 ## 3. 定制功能不变量
 
 每次同步上游后，至少核对下表。
 
 | 定制 | 不能回归的行为 | 主要位置 |
 | --- | --- | --- |
-| GPT-5.5 默认模型 | Codex `model` / `review_model` 默认 `gpt-5.5`；白名单、教程、价格都可识别 | `frontend/src/utils/clientConfig.ts`、`UseKeyModal.vue`、`UsageTutorialView.vue`、`useModelWhitelist.ts`、模型价格 JSON |
+| GPT-5.6-SOL 默认模型 | Codex `model` / `review_model` 默认 `gpt-5.6-sol`；白名单、教程、价格都可识别 | `frontend/src/utils/clientConfig.ts`、`UseKeyModal.vue`、`UsageTutorialView.vue`、`useModelWhitelist.ts`、模型价格 JSON |
 | PeterAI 多模型生图 | 同 Key/同分组多选模型；任务独立 `n:1`；最多 4 并发；可分模型提示词 | `deploy/static/image-generator/` |
 | PeterAI 独立画布 | 外部 Canvas 服务和源码不并入 Sub2API；菜单、iframe、认证参数与 CSP 不能回归；“新窗口打开”位于 iframe 上方工具栏，不遮挡画布控件 | `settings.custom_menu_items`、`CustomPageView.vue`、外部 `peterai-canvas` fork |
 | PeterAI 托管媒体 | Audio/Seedance 只调度显式能力 APIKey 账号；无明确价格 fail-closed；创建请求进入站内 usage 和扣费 | `openai_managed_media.go`、`gateway.go`、账号 `openai_capabilities` |
@@ -123,13 +149,13 @@ git push origin custom/gallery
 | 顶栏问候 | 根据本地时间切换；夜深文案保留；窄屏隐藏 | `AppHeader.vue`、locale `common.ts` |
 | 自定义 i18n | Gallery、教程、代理层级、问候、支付 key 不得直接显示 | `customFeatureLocaleKeys.spec.ts`、`headerGreetingLocales.spec.ts` |
 
-### 3.1 GPT-5.5 默认值
+### 3.1 GPT-5.6-SOL 默认值
 
 必须保持：
 
 ```text
-model = "gpt-5.5"
-review_model = "gpt-5.5"
+model = "gpt-5.6-sol"
+review_model = "gpt-5.6-sol"
 CLAUDE_CODE_ATTRIBUTION_HEADER=0
 ```
 

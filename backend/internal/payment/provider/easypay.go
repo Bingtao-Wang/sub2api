@@ -481,8 +481,8 @@ type easyPayQueryResponsePayload struct {
 	Data easyPayQueryData `json:"data"`
 }
 
-// Polling accepts findorder's code 200 as well as api.php's code 1. Callback
-// confirmation uses only the merchant's api.php and requires its success code.
+// Polling accepts findorder's code 200 as well as api.php's code 1.
+// Callback confirmation additionally binds findorder responses to the exact order.
 func parseEasyPayQueryResult(outTradeNo string, httpStatus int, body []byte, allowFindOrder bool) (*easyPayQueryResult, bool, error) {
 	if httpStatus < http.StatusOK || httpStatus >= http.StatusMultipleChoices {
 		return nil, true, fmt.Errorf("easypay parse query: HTTP %d: %s", httpStatus, summarizeEasyPayResponse(body))
@@ -550,13 +550,13 @@ func easyPayJSONScalarCode(code any) string {
 
 // ConfirmNotification checks a verified success notification against the
 // upstream order before it is fulfilled, so crediting follows the gateway's
-// own order state (paid, amount, trade_no). The query is sent to this
-// instance's own apiBase with its own credentials.
+// own order state (paid, amount, trade_no). Legacy gateways use authenticated
+// api.php; configured same-origin findorder gateways must echo the exact order.
 func (e *EasyPay) ConfirmNotification(ctx context.Context, n *payment.PaymentNotification) error {
 	if n == nil || n.Status != payment.NotificationStatusSuccess {
 		return nil
 	}
-	result, err := e.queryOrder(ctx, n.OrderID)
+	result, err := e.queryNotificationOrder(ctx, n.OrderID)
 	if err != nil {
 		return fmt.Errorf("easypay confirm: %w", err)
 	}
@@ -574,6 +574,46 @@ func (e *EasyPay) ConfirmNotification(ctx context.Context, n *payment.PaymentNot
 		n.TradeNo = result.tradeNo
 	}
 	return nil
+}
+
+// queryNotificationOrder never trusts an unrelated polling service to confirm a
+// payment. Some EasyPay gateways only expose findorder on their own origin.
+func (e *EasyPay) queryNotificationOrder(ctx context.Context, orderID string) (*easyPayQueryResult, error) {
+	endpoint, err := url.Parse(strings.TrimSpace(e.config["queryUrl"]))
+	base, baseErr := url.Parse(e.apiBase())
+	if err != nil || baseErr != nil || endpoint.User != nil ||
+		!strings.EqualFold(endpoint.Scheme, base.Scheme) || !strings.EqualFold(endpoint.Host, base.Host) ||
+		!strings.HasSuffix(strings.TrimRight(endpoint.Path, "/"), "/api/findorder") {
+		return e.queryOrder(ctx, orderID)
+	}
+	// Keep lookup bound to merchant out_trade_no; never fall back to a system ID.
+	body, status, err := e.postRaw(ctx, endpoint.String(), map[string]string{"order_no": orderID, "type": "2"})
+	if err != nil {
+		var urlErr *url.Error
+		if errors.As(err, &urlErr) {
+			err = urlErr.Err
+		}
+		return nil, fmt.Errorf("easypay findorder confirmation: %w", err)
+	}
+	result, _, err := parseEasyPayQueryResult(orderID, status, body, true)
+	if err != nil {
+		return nil, err
+	}
+	var payload easyPayQueryResponsePayload
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return nil, err
+	}
+	if !easyPayResponseCodeIsSuccess(payload.Code) && easyPayJSONScalarCode(payload.Code) != strconv.Itoa(easypayFindOrderOKCode) {
+		return nil, fmt.Errorf("easypay findorder confirmation missing success code")
+	}
+	echoed := easyPayJSONScalar(pickEasyPayJSON(payload.OutTradeNo, payload.Data.OutTradeNo))
+	if echoed == "" || echoed != orderID {
+		return nil, fmt.Errorf("easypay findorder confirmation requires matching out_trade_no")
+	}
+	if result.tradeNo == "" {
+		return nil, fmt.Errorf("easypay findorder confirmation missing trade_no")
+	}
+	return result, nil
 }
 
 func easyPayJSONScalar(raw json.RawMessage) string {
